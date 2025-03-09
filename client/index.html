@@ -123,7 +123,7 @@
         // Configure server URL based on environment
         const SERVER_URL = window.location.hostname === 'localhost' 
             ? 'http://localhost:5000'
-            : 'https://sign-language-server.onrender.com';  // This will be your Render.com URL
+            : 'https://sign-language-server.onrender.com';  // Update this URL with your Render.com URL
         
         const socket = io(SERVER_URL);
         let localStream;
