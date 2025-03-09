@@ -105,6 +105,10 @@ def get_room_gestures(room_id):
         'gestures': gestures
     })
 
+@app.route('/health')
+def health_check():
+    return jsonify({"status": "healthy", "message": "Server is running"}), 200
+
 def process_frame(frame):
     # Convert BGR to RGB
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
