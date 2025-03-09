@@ -1,0 +1,1 @@
+web: python server/gesture_server.py 

@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: sign-language-server
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server/gesture_server.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.0
+      - key: MONGODB_URI
+        sync: false 
