@@ -9,6 +9,13 @@ from datetime import datetime
 import uuid
 import itertools
 import os
+import sys
+
+# Add the server directory to Python path
+server_dir = os.path.dirname(os.path.abspath(__file__))
+if server_dir not in sys.path:
+    sys.path.append(server_dir)
+
 from model import KeyPointClassifier, PointHistoryClassifier
 from database import db
 
