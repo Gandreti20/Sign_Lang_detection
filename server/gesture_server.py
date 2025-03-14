@@ -33,6 +33,8 @@ hands = mp_hands.Hands(
 )
 
 # Initialize classifiers
+print(f"Current working directory: {os.getcwd()}")
+print(f"Server directory: {server_dir}")
 keypoint_classifier = KeyPointClassifier()
 point_history_classifier = PointHistoryClassifier()
 
@@ -114,7 +116,18 @@ def get_room_gestures(room_id):
 
 @app.route('/health')
 def health_check():
-    return jsonify({"status": "healthy", "message": "Server is running"}), 200
+    """Health check endpoint for monitoring"""
+    status = {
+        'status': 'ok',
+        'timestamp': datetime.now().isoformat(),
+        'environment': os.environ.get('FLASK_ENV', 'production'),
+        'database_connected': hasattr(db, 'db') and db.db is not None,
+        'models_loaded': {
+            'keypoint_classifier': keypoint_classifier is not None,
+            'point_history_classifier': point_history_classifier is not None
+        }
+    }
+    return jsonify(status)
 
 def process_frame(frame):
     # Convert BGR to RGB

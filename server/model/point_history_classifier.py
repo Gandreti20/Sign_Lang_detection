@@ -1,8 +1,15 @@
 import numpy as np
 import tensorflow as tf
+import os
 
 class PointHistoryClassifier(object):
-    def __init__(self, model_path='server/model/point_history_classifier.tflite', num_threads=1):
+    def __init__(self, model_path=None, num_threads=1):
+        if model_path is None:
+            # Get the directory where this file is located
+            model_dir = os.path.dirname(os.path.abspath(__file__))
+            model_path = os.path.join(model_dir, 'point_history_classifier.tflite')
+            
+        print(f"Loading PointHistoryClassifier model from: {model_path}")
         self.interpreter = tf.lite.Interpreter(model_path=model_path,
                                              num_threads=num_threads)
         self.interpreter.allocate_tensors()
