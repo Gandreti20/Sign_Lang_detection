@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Video Call with Sign Language Detection</title>
+    <link rel="stylesheet" href="/Sign_Lang_detection/styles.css">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -121,7 +122,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script>
         // Configure server URL based on environment
-        const SERVER_URL ='https://sign-language-server-wzqf.onrender.com';  // Update this URL with your Render.com URL
+        const SERVER_URL = 'https://sign-language-server-wzqf.onrender.com';  // Update this URL with your Render.com URL
         
         const socket = io(SERVER_URL);
         let localStream;
@@ -178,13 +179,16 @@
         socket.on('room-created', async data => {
             currentRoomId = data.roomId;
             document.getElementById('roomInfo').textContent = `Room created! ID: ${data.roomId}`;
+            
+            // Generate the shareable link
+            const roomLink = `${window.location.origin}?room=${data.roomId}`;
             const shareButton = document.getElementById('shareRoom');
             shareButton.style.display = 'inline';
             shareButton.onclick = () => {
-                const roomLink = `${window.location.origin}?room=${data.roomId}`;
                 navigator.clipboard.writeText(roomLink);
-                alert('Room link copied to clipboard!');
+                alert('Room link copied to clipboard! Share this link with others to join.');
             };
+            
             createPeerConnection();
             
             const offer = await peerConnection.createOffer();
