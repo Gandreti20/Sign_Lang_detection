@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Video Call with Sign Language Detection</title>
-    <link rel="stylesheet" href="style.css">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -120,6 +119,170 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <script src="script.js"></script>
+    <script>
+        // Configure server URL based on environment
+        const SERVER_URL = 'https://sign-language-server-wzqf.onrender.com';
+        
+        const socket = io(SERVER_URL);
+        let localStream;
+        let peerConnection;
+        let currentRoomId;
+
+        const configuration = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' }
+            ]
+        };
+
+        async function initializeMedia() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                document.getElementById('localVideo').srcObject = localStream;
+            } catch (error) {
+                console.error('Error accessing media devices:', error);
+            }
+        }
+
+        function createPeerConnection() {
+            peerConnection = new RTCPeerConnection(configuration);
+            
+            localStream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, localStream);
+            });
+
+            peerConnection.ontrack = event => {
+                document.getElementById('remoteVideo').srcObject = event.streams[0];
+            };
+
+            peerConnection.onicecandidate = event => {
+                if (event.candidate) {
+                    socket.emit('ice-candidate', event.candidate);
+                }
+            };
+        }
+
+        document.getElementById('createRoom').addEventListener('click', async () => {
+            await initializeMedia();
+            socket.emit('create-room');
+        });
+
+        document.getElementById('joinRoom').addEventListener('click', async () => {
+            const roomId = document.getElementById('roomInput').value;
+            if (!roomId) return;
+            
+            currentRoomId = roomId;
+            await initializeMedia();
+            socket.emit('join-room', { roomId });
+        });
+
+        socket.on('room-created', async data => {
+            currentRoomId = data.roomId;
+            document.getElementById('roomInfo').textContent = `Room created! ID: ${data.roomId}`;
+            const shareButton = document.getElementById('shareRoom');
+            shareButton.style.display = 'inline';
+            shareButton.onclick = () => {
+                const roomLink = `${window.location.origin}?room=${data.roomId}`;
+                navigator.clipboard.writeText(roomLink);
+                alert('Room link copied to clipboard!');
+            };
+            createPeerConnection();
+            
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            socket.emit('offer', { offer, roomId: data.roomId });
+        });
+
+        socket.on('offer', async data => {
+            createPeerConnection();
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+            
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            socket.emit('answer', { answer, roomId: data.roomId });
+        });
+
+        socket.on('answer', async data => {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+        });
+
+        socket.on('ice-candidate', async data => {
+            try {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(data));
+            } catch (error) {
+                console.error('Error adding ICE candidate:', error);
+            }
+        });
+
+        socket.on('gesture-detected', data => {
+            const translationElement = data.userId === socket.id ? 
+                document.getElementById('localTranslation') : 
+                document.getElementById('remoteTranslation');
+            
+            translationElement.textContent = data.gesture.translation;
+            setTimeout(() => {
+                translationElement.textContent = '';
+            }, 3000);
+
+            // Add to gesture history
+            addGestureToHistory(data);
+        });
+
+        socket.on('gesture-history', data => {
+            const gestureList = document.getElementById('gestureList');
+            gestureList.innerHTML = '';
+            
+            data.gestures.forEach(gesture => {
+                addGestureToHistory(gesture);
+            });
+        });
+
+        function addGestureToHistory(gestureData) {
+            const gestureList = document.getElementById('gestureList');
+            const gestureItem = document.createElement('div');
+            gestureItem.className = 'gesture-item';
+            
+            const time = new Date(gestureData.timestamp).toLocaleTimeString();
+            const isLocal = gestureData.userId === socket.id;
+            
+            gestureItem.innerHTML = `
+                <span>${isLocal ? 'You' : 'Remote User'}: ${gestureData.gesture.translation}</span>
+                <span class="gesture-time">${time}</span>
+            `;
+            
+            gestureList.insertBefore(gestureItem, gestureList.firstChild);
+        }
+
+        // Send video frames for gesture detection
+        function sendFrameForDetection(video) {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            
+            setInterval(() => {
+                if (!currentRoomId) return;
+                
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const frame = canvas.toDataURL('image/jpeg', 0.5);
+                socket.emit('gesture-frame', { 
+                    frame,
+                    roomId: currentRoomId
+                });
+            }, 100); // Send frame every 100ms
+        }
+
+        document.getElementById('localVideo').addEventListener('play', function() {
+            sendFrameForDetection(this);
+        });
+
+        // Handle room ID from URL when page loads
+        window.onload = () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomId = urlParams.get('room');
+            if (roomId) {
+                document.getElementById('roomInput').value = roomId;
+            }
+        };
+    </script>
 </body>
 </html> 
