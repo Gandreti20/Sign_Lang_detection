@@ -1,0 +1,1309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Call with Sign Language Detection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .video-container {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .video-wrapper {
+            width: 48%;
+            position: relative;
+        }
+        video {
+            width: 100%;
+            border-radius: 8px;
+            background-color: #000;
+        }
+        .controls {
+            margin-bottom: 20px;
+            padding: 20px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        button {
+            padding: 10px 20px;
+            margin-right: 10px;
+            border: none;
+            border-radius: 4px;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .translation {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        #roomInfo {
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+        }
+        .gesture-history {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .gesture-item {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .gesture-item:last-child {
+            border-bottom: none;
+        }
+        .gesture-time {
+            color: #666;
+            font-size: 12px;
+        }
+        .room-details {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .share-link {
+            margin-top: 15px;
+        }
+        .share-link input {
+            width: 80%;
+            padding: 8px;
+            margin-right: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .room-details button {
+            padding: 8px 16px;
+            background: #28a745;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="controls">
+            <button id="createRoom">Create Room</button>
+            <button id="joinRoom">Join Room</button>
+            <input type="text" id="roomInput" placeholder="Enter Room ID">
+            <button id="shareRoom" style="display: none;">Share Room Link</button>
+        </div>
+        
+        <div id="roomInfo"></div>
+        
+        <div class="video-container">
+            <div class="video-wrapper">
+                <video id="localVideo" autoplay playsinline muted></video>
+                <div class="translation" id="localTranslation"></div>
+            </div>
+            <div class="video-wrapper">
+                <video id="remoteVideo" autoplay playsinline></video>
+                <div class="translation" id="remoteTranslation"></div>
+            </div>
+        </div>
+
+        <div class="gesture-history">
+            <h3>Gesture History</h3>
+            <div id="gestureList"></div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.scaledrone.com/scaledrone.min.js"></script>
+    <script>
+        // Configure server URL based on environment
+        const SERVER_URL = 'https://sign-language-server-wzqf.onrender.com';
+        
+        const socket = io(SERVER_URL, {
+            transports: ['polling'],
+            reconnection: true,
+            reconnectionAttempts: 10,
+            reconnectionDelay: 1000,
+            timeout: 60000,
+            forceNew: false,
+            autoConnect: true,
+            path: '/socket.io'
+        });
+        let localStream;
+        let peerConnection;
+        let currentRoomId;
+
+        const configuration = {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' }
+            ],
+            iceCandidatePoolSize: 10
+        };
+
+        async function initializeMedia() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                document.getElementById('localVideo').srcObject = localStream;
+            } catch (error) {
+                console.error('Error accessing media devices:', error);
+            }
+        }
+
+        function createPeerConnection() {
+            try {
+                peerConnection = new RTCPeerConnection(configuration);
+                
+                // Add local stream tracks to the connection
+                if (localStream) {
+                    localStream.getTracks().forEach(track => {
+                        peerConnection.addTrack(track, localStream);
+                    });
+                } else {
+                    console.warn("Local stream not available when creating peer connection");
+                }
+
+                // Handle incoming tracks
+                peerConnection.ontrack = event => {
+                    const remoteVideo = document.getElementById('remoteVideo');
+                    if (remoteVideo.srcObject !== event.streams[0]) {
+                        console.log("Setting remote video stream");
+                        remoteVideo.srcObject = event.streams[0];
+                    }
+                };
+
+                // For local rooms, we need to handle ICE candidates differently
+                if (isUsingLocalRoom()) {
+                    setupLocalIceCandidateExchange();
+                } else {
+                    peerConnection.onicecandidate = event => {
+                        if (event.candidate) {
+                            socket.emit('ice-candidate', event.candidate);
+                        }
+                    };
+                }
+                
+                // Log connection state changes
+                peerConnection.oniceconnectionstatechange = () => {
+                    console.log("ICE connection state:", peerConnection.iceConnectionState);
+                };
+                
+                return peerConnection;
+            } catch (error) {
+                console.error("Error creating peer connection:", error);
+                return null;
+            }
+        }
+
+        // Improved server availability check
+        async function checkServerAvailability() {
+            try {
+                console.log('Checking server availability...');
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
+                
+                const response = await fetch(`${SERVER_URL}/health`, {
+                    signal: controller.signal,
+                    cache: 'no-store',
+                    headers: {
+                        'Cache-Control': 'no-cache'
+                    }
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('✅ Server health check passed:', data);
+                    return true;
+                }
+                
+                console.error('❌ Server health check failed with status:', response.status);
+                return false;
+            } catch (error) {
+                console.error('❌ Server availability check error:', error.message);
+                document.getElementById('roomInfo').innerHTML = `
+                    <div class="room-details" style="color: red;">
+                        <h3>Server Unavailable</h3>
+                        <p>${error.name === 'AbortError' ? 'Server request timed out' : error.message}</p>
+                        <button onclick="checkServerAvailability()" style="background: #dc3545;">Try Again</button>
+                    </div>
+                `;
+                return false;
+            }
+        }
+
+        // Enhanced connection logging
+        socket.on('connect', () => {
+            console.log('✅ Connected to server with ID:', socket.id);
+            console.log('✅ Transport method:', socket.io.engine.transport.name);
+            console.log('✅ Connection state:', socket.connected ? 'connected' : 'disconnected');
+            
+            // Verify connection is working
+            socket.emit('ping');
+        });
+
+        socket.on('pong', () => {
+            console.log('✅ Received pong from server - connection is working');
+        });
+
+        // Add this function to check if we're using a local room
+        function isUsingLocalRoom() {
+            return currentRoomId && !currentRoomId.includes('-');
+        }
+
+        // Update the socket connection error handler
+        socket.on('connect_error', (error) => {
+            console.error('❌ Socket connection error:', error.message);
+            
+            // If we're using a local room, don't show the error
+            if (isUsingLocalRoom()) {
+                console.log("Using local room - ignoring socket connection errors");
+                return;
+            }
+            
+            document.getElementById('roomInfo').innerHTML = `
+                <div class="room-details" style="color: red;">
+                    <h3>Connection Error</h3>
+                    <p>Failed to connect to server: ${error.message}</p>
+                    <button onclick="reconnectSocket()" style="background: #dc3545;">Reconnect</button>
+                    <button onclick="createLocalRoom()" style="background: #28a745; margin-left: 10px;">Use Local Room</button>
+                </div>
+            `;
+        });
+
+        // Update the socket disconnect handler
+        socket.on('disconnect', (reason) => {
+            console.error('❌ Socket disconnected:', reason);
+            
+            // If we're using a local room, don't try to reconnect
+            if (isUsingLocalRoom()) {
+                console.log("Using local room - not attempting reconnection");
+                socket.disconnect(); // Explicitly disconnect to prevent auto-reconnect
+            }
+        });
+
+        // Add this debugging code right after the socket connection setup
+        socket.on('ping', () => {
+            console.log('✅ Received pong from server - connection is working');
+            // Test emitting a simple event to verify bidirectional communication
+            socket.emit('test-event', { message: 'Testing event emission' });
+        });
+
+        // Add this to the server to verify event reception
+        socket.on('test-event', (data) => {
+            console.log('✅ Test event received:', data);
+            // Respond to confirm the server can emit back
+            emit('test-response', { received: true });
+        });
+
+        // Add this to verify server responses
+        socket.on('test-response', (data) => {
+            console.log('✅ Server responded to test event:', data);
+        });
+
+        // Add this function before the createRoom event handler
+        async function isServerReachable() {
+            try {
+                console.log("Testing basic server reachability...");
+                const response = await fetch(`${SERVER_URL}/health`, {
+                    method: 'GET',
+                    mode: 'cors',
+                    cache: 'no-cache',
+                    headers: {
+                        'Accept': 'application/json'
+                    },
+                    timeout: 5000
+                });
+                
+                if (response.ok) {
+                    console.log("✅ Server is reachable");
+                    return true;
+                } else {
+                    console.error("❌ Server returned status:", response.status);
+                    return false;
+                }
+            } catch (error) {
+                console.error("❌ Server is not reachable:", error.message);
+                return false;
+            }
+        }
+
+        // Update the create room event handler
+        document.getElementById('createRoom').addEventListener('click', async () => {
+            console.log("🔘 Create Room button clicked - event handler triggered");
+            
+            // Show loading state immediately
+            document.getElementById('roomInfo').innerHTML = `
+                <div class="room-details">
+                    <h3>Initializing...</h3>
+                    <p>Checking server availability...</p>
+                </div>
+            `;
+            
+            try {
+                // First check if server is reachable at all
+                const serverReachable = await isServerReachable().catch(() => false);
+                
+                // Initialize media first to avoid delays later
+                console.log("Initializing media...");
+                document.getElementById('roomInfo').innerHTML = `
+                    <div class="room-details">
+                        <h3>Initializing Media...</h3>
+                        <p>Please allow camera and microphone access...</p>
+                    </div>
+                `;
+                
+                await initializeMedia();
+                console.log("Media initialized successfully");
+                
+                if (serverReachable) {
+                    // If socket is not connected, try to connect with shorter timeout
+                    if (!socket.connected) {
+                        console.log("Socket not connected, attempting to connect...");
+                        
+                        // Force a new connection attempt
+                        socket.disconnect();
+                        socket.connect();
+                        
+                        // Wait for connection with a shorter timeout
+                        try {
+                            await new Promise((resolve, reject) => {
+                                const timeout = setTimeout(() => {
+                                    socket.off('connect');
+                                    reject(new Error('Socket connection timed out after 5 seconds'));
+                                }, 5000); // Reduce timeout to 5 seconds
+                                
+                                socket.once('connect', () => {
+                                    clearTimeout(timeout);
+                                    console.log("✅ Socket connected successfully");
+                                    resolve();
+                                });
+                            });
+                            
+                            // Show room creation state
+                            document.getElementById('roomInfo').innerHTML = `
+                                <div class="room-details">
+                                    <h3>Creating Room...</h3>
+                                    <p>Connecting to server and creating your room...</p>
+                                </div>
+                            `;
+                            
+                            console.log("Creating room...");
+                            createRoom();
+                        } catch (error) {
+                            console.log("Socket connection timed out, falling back to local room");
+                            createLocalRoom();
+                        }
+                    } else {
+                        // Socket already connected
+                        document.getElementById('roomInfo').innerHTML = `
+                            <div class="room-details">
+                                <h3>Creating Room...</h3>
+                                <p>Connecting to server and creating your room...</p>
+                            </div>
+                        `;
+                        
+                        console.log("Creating room...");
+                        createRoom();
+                    }
+                } else {
+                    // Server not reachable, use local room
+                    console.log("Server not reachable, using local room");
+                    createLocalRoom();
+                }
+            } catch (error) {
+                console.error("Error in room creation setup:", error);
+                document.getElementById('roomInfo').innerHTML = `
+                    <div class="room-details" style="color: red;">
+                        <h3>Connection Error</h3>
+                        <p>${error.message}</p>
+                        <p>Falling back to local room mode.</p>
+                        <button onclick="createLocalRoom()" style="background: #28a745;">Create Local Room</button>
+                    </div>
+                `;
+            }
+        });
+
+        // Modify the createRoom function to use a simpler approach
+        function createRoom() {
+            console.log("Setting up room creation listeners...");
+            
+            // Clear any existing listeners
+            socket.off('room-created');
+            socket.off('error');
+            
+            // Set up a timeout for the entire process
+            const timeout = setTimeout(() => {
+                console.log("Room creation timed out");
+                socket.off('room-created');
+                socket.off('error');
+                
+                // Try alternative method
+                console.log("Trying alternative room creation method...");
+                tryAlternativeRoomCreation();
+            }, 10000);
+
+            // Set up event listeners
+            socket.once('room-created', (data) => {
+                console.log('Room created event received:', data);
+                clearTimeout(timeout);
+                
+                if (!data || !data.roomId) {
+                    document.getElementById('roomInfo').innerHTML = `
+                        <div class="room-details" style="color: red;">
+                            <h3>Invalid Room Data</h3>
+                            <p>The server returned invalid room data.</p>
+                            <button onclick="retryCreateRoom()" style="background: #dc3545;">Try Again</button>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                handleRoomCreated(data);
+            });
+
+            socket.once('error', (error) => {
+                console.error('Error event received:', error);
+                clearTimeout(timeout);
+                
+                document.getElementById('roomInfo').innerHTML = `
+                    <div class="room-details" style="color: red;">
+                        <h3>Room Creation Error</h3>
+                        <p>${error.message || 'An unknown error occurred'}</p>
+                        <button onclick="retryCreateRoom()" style="background: #dc3545;">Try Again</button>
+                    </div>
+                `;
+            });
+
+            // Simple emit without acknowledgment
+            console.log("Emitting create-room event to server...");
+            socket.emit('create-room');
+        }
+
+        // Handle successful room creation
+        function handleRoomCreated(data) {
+            console.log("Handling successful room creation:", data);
+            currentRoomId = data.roomId;
+            const roomLink = `${window.location.origin}/Sign_Lang_detection?room=${data.roomId}`;
+            
+            document.getElementById('roomInfo').innerHTML = `
+                <div class="room-details">
+                    <h3>Room Created Successfully! 🎉</h3>
+                    <p>Room ID: <strong>${data.roomId}</strong></p>
+                    <div class="share-link">
+                        <p><strong>Share this link:</strong></p>
+                        <div style="display: flex; gap: 10px; margin: 10px 0;">
+                            <input type="text" value="${roomLink}" readonly id="roomLink" 
+                                   style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <button onclick="copyRoomLink()" class="copy-button" 
+                                    style="background: #28a745;">Copy Link</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Create peer connection
+            createPeerConnection();
+            console.log("Peer connection created successfully");
+        }
+
+        document.getElementById('joinRoom').addEventListener('click', async () => {
+            const roomId = document.getElementById('roomInput').value;
+            if (!roomId) {
+                alert("Please enter a Room ID");
+                return;
+            }
+            
+            // Show joining state
+            document.getElementById('roomInfo').innerHTML = `
+                <div class="room-details">
+                    <h3>Joining Room...</h3>
+                    <p>Connecting to room ${roomId}...</p>
+                </div>
+            `;
+            
+            try {
+                // Initialize media
+                await initializeMedia();
+                
+                // Check if server is available
+                const serverAvailable = await isServerReachable().catch(() => false);
+                
+                if (serverAvailable && socket.connected) {
+                    // Join via server
+                    currentRoomId = roomId;
+                    socket.emit('join-room', { roomId });
+                    console.log("Joining room via server:", roomId);
+                } else {
+                    // Join locally
+                    console.log("Server unavailable, joining room locally");
+                    joinLocalRoom(roomId);
+                }
+            } catch (error) {
+                console.error("Error joining room:", error);
+                document.getElementById('roomInfo').innerHTML = `
+                    <div class="room-details" style="color: red;">
+                        <h3>Error Joining Room</h3>
+                        <p>${error.message}</p>
+                        <button onclick="window.location.reload()" style="background: #dc3545;">Try Again</button>
+                    </div>
+                `;
+            }
+        });
+
+        socket.on('offer', async data => {
+            createPeerConnection();
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+            
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            socket.emit('answer', { answer, roomId: data.roomId });
+        });
+
+        socket.on('answer', async data => {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+        });
+
+        socket.on('ice-candidate', async data => {
+            try {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(data));
+            } catch (error) {
+                console.error('Error adding ICE candidate:', error);
+            }
+        });
+
+        socket.on('gesture-detected', data => {
+            const translationElement = data.userId === socket.id ? 
+                document.getElementById('localTranslation') : 
+                document.getElementById('remoteTranslation');
+            
+            translationElement.textContent = data.gesture.translation;
+            setTimeout(() => {
+                translationElement.textContent = '';
+            }, 3000);
+
+            // Add to gesture history
+            addGestureToHistory(data);
+        });
+
+        socket.on('gesture-history', data => {
+            const gestureList = document.getElementById('gestureList');
+            gestureList.innerHTML = '';
+            
+            data.gestures.forEach(gesture => {
+                addGestureToHistory(gesture);
+            });
+        });
+
+        function addGestureToHistory(gestureData) {
+            const gestureList = document.getElementById('gestureList');
+            const gestureItem = document.createElement('div');
+            gestureItem.className = 'gesture-item';
+            
+            const time = new Date(gestureData.timestamp).toLocaleTimeString();
+            const isLocal = gestureData.userId === socket.id;
+            
+            gestureItem.innerHTML = `
+                <span>${isLocal ? 'You' : 'Remote User'}: ${gestureData.gesture.translation}</span>
+                <span class="gesture-time">${time}</span>
+            `;
+            
+            gestureList.insertBefore(gestureItem, gestureList.firstChild);
+        }
+
+        // Update the sendFrameForDetection function to check if using a local room
+        function sendFrameForDetection(video) {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            
+            // Store the interval ID so we can clear it if needed
+            const frameInterval = setInterval(() => {
+                // Check if we have a room ID and if socket is connected
+                if (!currentRoomId) return;
+                
+                // Check if this is a local room (starts with a specific prefix or pattern)
+                const isLocalRoom = !socket.connected || currentRoomId.length === 8;
+                
+                // If it's a local room, don't try to send frames
+                if (isLocalRoom) {
+                    console.log("Using local room - gesture detection disabled");
+                    return;
+                }
+                
+                // Only send frames if socket is connected
+                if (!socket.connected) {
+                    console.log("Socket disconnected - pausing frame sending");
+                    return;
+                }
+                
+                try {
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    const frame = canvas.toDataURL('image/jpeg', 0.5);
+                    socket.emit('gesture-frame', { 
+                        frame,
+                        roomId: currentRoomId
+                    });
+                } catch (error) {
+                    console.error("Error sending frame:", error);
+                }
+            }, 100); // Send frame every 100ms
+            
+            // Store the interval ID on the window object so we can clear it later if needed
+            window.frameDetectionInterval = frameInterval;
+            
+            // Add a function to stop frame detection
+            window.stopFrameDetection = function() {
+                if (window.frameDetectionInterval) {
+                    clearInterval(window.frameDetectionInterval);
+                    console.log("Frame detection stopped");
+                }
+            };
+        }
+
+        document.getElementById('localVideo').addEventListener('play', function() {
+            sendFrameForDetection(this);
+        });
+
+        // Update the window load handler
+        window.onload = async () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomId = urlParams.get('room');
+            
+            if (roomId) {
+                console.log("Found room ID in URL:", roomId);
+                document.getElementById('roomInput').value = roomId;
+                
+                // Auto-join the room after a short delay
+                setTimeout(async () => {
+                    try {
+                        // Initialize media
+                        await initializeMedia();
+                        
+                        // Check if server is available
+                        const serverAvailable = await isServerReachable().catch(() => false);
+                        
+                        if (serverAvailable && socket.connected) {
+                            // Join via server
+                            currentRoomId = roomId;
+                            socket.emit('join-room', { roomId });
+                            console.log("Auto-joining room via server:", roomId);
+                        } else {
+                            // Join locally
+                            console.log("Server unavailable, auto-joining room locally");
+                            joinLocalRoom(roomId);
+                        }
+                    } catch (error) {
+                        console.error("Error auto-joining room:", error);
+                        document.getElementById('roomInfo').innerHTML = `
+                            <div class="room-details" style="color: red;">
+                                <h3>Error Joining Room</h3>
+                                <p>${error.message}</p>
+                                <button onclick="window.location.reload()" style="background: #dc3545;">Try Again</button>
+                            </div>
+                        `;
+                    }
+                }, 1000);
+            }
+        };
+
+        // Add this function for copying the room link if it doesn't exist
+        function copyRoomLink() {
+            const roomLink = document.getElementById('roomLink');
+            roomLink.select();
+            roomLink.setSelectionRange(0, 99999); // For mobile devices
+            
+            try {
+                const successful = document.execCommand('copy');
+                
+                // Show success message
+                const button = event.target;
+                const originalText = button.textContent;
+                button.textContent = 'Copied! ✓';
+                button.style.backgroundColor = '#218838';
+                
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.style.backgroundColor = '#28a745';
+                }, 2000);
+                
+                console.log('Copy successful:', successful);
+            } catch (err) {
+                console.error('Failed to copy:', err);
+                alert('Failed to copy link. Please copy it manually.');
+            }
+        }
+
+        // Update the retryCreateRoom function to fall back to local room faster
+        function retryCreateRoom() {
+            console.log("Retrying room creation...");
+            
+            // Reset any error states
+            document.getElementById('roomInfo').innerHTML = `
+                <div class="room-details">
+                    <h3>Reconnecting...</h3>
+                    <p>Attempting to reconnect to server...</p>
+                </div>
+            `;
+            
+            // Check socket connection
+            if (!socket.connected) {
+                console.log("Socket not connected, trying local room creation...");
+                createLocalRoom();
+            } else {
+                console.log("Socket connected, trying alternative room creation...");
+                tryAlternativeRoomCreation();
+            }
+        }
+
+        // Add reconnect function
+        function reconnectSocket() {
+            console.log('Attempting to reconnect socket...');
+            socket.connect();
+            document.getElementById('roomInfo').innerHTML = `
+                <div class="room-details">
+                    <h3>Reconnecting...</h3>
+                    <p>Attempting to connect to server...</p>
+                </div>
+            `;
+        }
+
+        // Add connection attempt logging
+        console.log("Attempting to connect to server at:", SERVER_URL);
+
+        // Add this function to try alternative connection methods
+        function tryAlternativeConnection() {
+            console.log("Trying alternative connection method...");
+            
+            // Create a new socket with minimal options
+            const alternativeSocket = io(SERVER_URL, {
+                transports: ['polling'],
+                reconnection: false,
+                timeout: 10000
+            });
+            
+            alternativeSocket.on('connect', () => {
+                console.log("✅ Alternative connection successful");
+                alternativeSocket.disconnect();
+                
+                // Try reconnecting the main socket
+                socket.disconnect();
+                setTimeout(() => {
+                    socket.connect();
+                }, 1000);
+            });
+            
+            alternativeSocket.on('connect_error', (error) => {
+                console.error("❌ Alternative connection failed:", error.message);
+                alternativeSocket.disconnect();
+            });
+            
+            // Disconnect after 10 seconds regardless
+            setTimeout(() => {
+                if (alternativeSocket.connected) {
+                    alternativeSocket.disconnect();
+                }
+            }, 10000);
+        }
+
+        // Update the alternative room creation method
+        function tryAlternativeRoomCreation() {
+            console.log("Trying alternative room creation method...");
+            
+            // Try simple socket event first
+            trySimpleSocketRoomCreation();
+        }
+
+        // Add this function for simple socket room creation
+        function trySimpleSocketRoomCreation() {
+            console.log("Attempting to create room via simple socket event...");
+            
+            document.getElementById('roomInfo').innerHTML = `
+                <div class="room-details">
+                    <h3>Creating Room (Alternative Method)...</h3>
+                    <p>Trying simplified approach...</p>
+                </div>
+            `;
+            
+            // Clear any existing listeners
+            socket.off('simple-room-created');
+            socket.off('error');
+            
+            // Set up a timeout
+            const timeout = setTimeout(() => {
+                console.log("Simple room creation timed out");
+                socket.off('simple-room-created');
+                socket.off('error');
+                
+                // Try HTTP fallback as last resort
+                createRoomViaHttp();
+            }, 10000);
+            
+            // Set up event listeners
+            socket.once('simple-room-created', (data) => {
+                console.log('Simple room created event received:', data);
+                clearTimeout(timeout);
+                
+                if (!data || !data.roomId) {
+                    document.getElementById('roomInfo').innerHTML = `
+                        <div class="room-details" style="color: red;">
+                            <h3>Invalid Room Data</h3>
+                            <p>The server returned invalid room data.</p>
+                            <button onclick="retryCreateRoom()" style="background: #dc3545;">Try Again</button>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                handleRoomCreated(data);
+            });
+            
+            socket.once('error', (error) => {
+                console.error('Error event received:', error);
+                clearTimeout(timeout);
+                
+                // Try HTTP fallback
+                createRoomViaHttp();
+            });
+            
+            // Emit simple event
+            console.log("Emitting simple-create-room event...");
+            socket.emit('simple-create-room');
+        }
+
+        // Update the HTTP fallback function
+        async function createRoomViaHttp() {
+            console.log("Attempting to create room via HTTP fallback...");
+            
+            document.getElementById('roomInfo').innerHTML = `
+                <div class="room-details">
+                    <h3>Creating Room (HTTP Fallback)...</h3>
+                    <p>Waiting for server response...</p>
+                </div>
+            `;
+            
+            try {
+                const response = await fetch(`${SERVER_URL}/create-room`, {
+                    method: 'POST',
+                    mode: 'cors', // Explicitly set CORS mode
+                    credentials: 'omit', // Don't send cookies
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        clientId: socket.id || 'unknown'
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log("Room created via HTTP:", data);
+                
+                if (data.success && data.roomId) {
+                    // Manually join the room via socket
+                    socket.emit('join-room', { roomId: data.roomId });
+                    
+                    // Handle room creation success
+                    handleRoomCreated(data);
+                } else {
+                    throw new Error(data.error || 'Unknown error');
+                }
+            } catch (error) {
+                console.error("HTTP room creation failed:", error);
+                
+                // Final fallback - generate a room ID locally
+                if (error.message.includes('CORS') || error.message.includes('Failed to fetch')) {
+                    console.log("CORS issue detected, using local room ID generation as last resort");
+                    createLocalRoom();
+                } else {
+                    document.getElementById('roomInfo').innerHTML = `
+                        <div class="room-details" style="color: red;">
+                            <h3>Room Creation Failed</h3>
+                            <p>${error.message}</p>
+                            <button onclick="retryCreateRoom()" style="background: #dc3545;">Try Again</button>
+                        </div>
+                    `;
+                }
+            }
+        }
+
+        // Update the createLocalRoom function to generate a shareable link
+        function createLocalRoom() {
+            console.log("Creating room locally");
+            
+            // Generate a random room ID
+            const roomId = Math.random().toString(36).substring(2, 10);
+            
+            // Create a proper shareable URL - use the actual deployed URL instead of localhost
+            // If you're testing locally, you'll need to deploy this to a public server
+            const baseUrl = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost' 
+                ? 'https://yourusername.github.io/sign-language-detection/client/' // Replace with your actual GitHub Pages URL
+                : window.location.origin + window.location.pathname;
+            
+            const roomUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}room=${roomId}`;
+            
+            // Create a QR code for easy mobile access
+            const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(roomUrl)}`;
+            
+            document.getElementById('roomInfo').innerHTML = `
+                <div class="room-details">
+                    <h3>Local Room Created! 🎉</h3>
+                    <p>Room ID: <strong>${roomId}</strong></p>
+                    <div class="alert" style="background-color: #fff3cd; padding: 10px; border-radius: 4px; margin: 10px 0;">
+                        <p><strong>Important:</strong> To share this room with others:</p>
+                        <ol style="margin-left: 20px;">
+                            <li>You need to deploy this app to a public web server</li>
+                            <li>Both you and your partner need to access the app from the same public URL</li>
+                            <li>Local rooms only work when both users can access the same website</li>
+                        </ol>
+                        <p>For testing, you can use services like <a href="https://ngrok.com/" target="_blank">ngrok</a> or <a href="https://github.com/pages/" target="_blank">GitHub Pages</a>.</p>
+                    </div>
+                    <div class="share-link">
+                        <p><strong>Room ID to share:</strong></p>
+                        <div style="display: flex; gap: 10px; margin: 10px 0;">
+                            <input type="text" value="${roomId}" 
+                                   readonly id="roomLink" 
+                                   style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <button onclick="copyRoomLink()" class="copy-button" 
+                                    style="background: #28a745;">Copy ID</button>
+                        </div>
+                    </div>
+                    <div style="text-align: center; margin: 15px 0;">
+                        <p><strong>QR Code (only works with deployed app):</strong></p>
+                        <img src="${qrCodeUrl}" alt="Room QR Code" style="max-width: 150px; margin: 10px auto;">
+                    </div>
+                </div>
+            `;
+            
+            // Set current room ID
+            currentRoomId = roomId;
+            
+            // Create peer connection and set up local signaling
+            createPeerConnection();
+            setupLocalPeerConnection();
+            
+            // Disable frame sending to server
+            window.stopFrameDetection && window.stopFrameDetection();
+            
+            // Make the room joinable
+            document.getElementById('shareRoom').style.display = 'inline-block';
+        }
+
+        // Add this function to use a public signaling service
+        async function setupPublicSignaling(roomId) {
+            // Use a free public signaling service like Scaledrone
+            const drone = new ScaleDrone('YOUR_CHANNEL_ID'); // Sign up at scaledrone.com for a free channel ID
+            
+            drone.on('open', error => {
+                if (error) {
+                    console.error('Error connecting to signaling server:', error);
+                    return;
+                }
+                
+                // Room name needs to be prefixed with 'observable-'
+                const room = drone.subscribe(`observable-${roomId}`);
+                
+                room.on('open', error => {
+                    if (error) {
+                        console.error('Error opening room:', error);
+                        return;
+                    }
+                    console.log('Connected to signaling room');
+                });
+                
+                // Listen for signaling messages
+                room.on('data', message => {
+                    if (message.sender !== drone.clientId) {
+                        console.log('Received signaling message:', message);
+                        
+                        if (message.type === 'offer') {
+                            handleRemoteOffer(message.offer);
+                        } else if (message.type === 'answer') {
+                            handleRemoteAnswer(message.answer);
+                        } else if (message.type === 'candidate') {
+                            handleRemoteCandidate(message.candidate);
+                        }
+                    }
+                });
+                
+                // Store the drone instance for sending messages
+                window.signalingDrone = drone;
+            });
+        }
+
+        // Function to send signaling messages
+        function sendSignalingMessage(message) {
+            if (window.signalingDrone) {
+                window.signalingDrone.publish({
+                    room: `observable-${currentRoomId}`,
+                    message: {
+                        ...message,
+                        sender: window.signalingDrone.clientId
+                    }
+                });
+            }
+        }
+
+        // Update the setupLocalPeerConnection function to use the signaling service
+        async function setupLocalPeerConnection() {
+            if (!peerConnection) {
+                createPeerConnection();
+            }
+            
+            // Set up signaling
+            await setupPublicSignaling(currentRoomId);
+            
+            try {
+                // Create an offer
+                const offer = await peerConnection.createOffer({
+                    offerToReceiveAudio: true,
+                    offerToReceiveVideo: true
+                });
+                
+                await peerConnection.setLocalDescription(offer);
+                
+                // Send the offer through the signaling service
+                sendSignalingMessage({
+                    type: 'offer',
+                    offer: offer
+                });
+                
+                console.log("Local peer connection setup complete");
+            } catch (error) {
+                console.error("Error setting up local peer connection:", error);
+            }
+        }
+
+        // Add these handler functions
+        async function handleRemoteOffer(offer) {
+            try {
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+                
+                // Create an answer
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                
+                // Send the answer
+                sendSignalingMessage({
+                    type: 'answer',
+                    answer: answer
+                });
+            } catch (error) {
+                console.error("Error handling remote offer:", error);
+            }
+        }
+
+        async function handleRemoteAnswer(answer) {
+            try {
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+            } catch (error) {
+                console.error("Error handling remote answer:", error);
+            }
+        }
+
+        async function handleRemoteCandidate(candidate) {
+            try {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+            } catch (error) {
+                console.error("Error handling remote ICE candidate:", error);
+            }
+        }
+
+        // Update the ICE candidate handling
+        function setupIceCandidateHandling() {
+            peerConnection.onicecandidate = event => {
+                if (event.candidate) {
+                    // Send the ICE candidate through the signaling service
+                    sendSignalingMessage({
+                        type: 'candidate',
+                        candidate: event.candidate
+                    });
+                }
+            };
+        }
+
+        // Update the joinLocalRoom function to use the local signaling mechanism
+        async function joinLocalRoom(roomId) {
+            console.log("Joining local room:", roomId);
+            
+            try {
+                // Initialize media if not already done
+                if (!localStream) {
+                    await initializeMedia();
+                }
+                
+                // Set current room ID
+                currentRoomId = roomId;
+                
+                // Create peer connection
+                createPeerConnection();
+                
+                // Check for an offer in localStorage
+                const offerJson = localStorage.getItem(`offer_${roomId}`);
+                if (offerJson) {
+                    try {
+                        const offer = JSON.parse(offerJson);
+                        
+                        // Set the remote description
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+                        
+                        // Create an answer
+                        const answer = await peerConnection.createAnswer();
+                        await peerConnection.setLocalDescription(answer);
+                        
+                        // Store the answer in localStorage
+                        localStorage.setItem(`answer_${roomId}`, JSON.stringify(answer));
+                        
+                        document.getElementById('roomInfo').innerHTML = `
+                            <div class="room-details">
+                                <h3>Joined Local Room! 🎉</h3>
+                                <p>Room ID: <strong>${roomId}</strong></p>
+                                <div class="alert" style="background-color: #d4edda; padding: 10px; border-radius: 4px; margin: 10px 0;">
+                                    <p><strong>Connection established!</strong></p>
+                                    <p>You should now see the remote video once the connection is complete.</p>
+                                </div>
+                            </div>
+                        `;
+                        
+                        console.log("Local room joined, answer created");
+                    } catch (error) {
+                        console.error("Error processing offer:", error);
+                        throw error;
+                    }
+                } else {
+                    document.getElementById('roomInfo').innerHTML = `
+                        <div class="room-details" style="color: orange;">
+                            <h3>Waiting for Room Creator</h3>
+                            <p>Room ID: <strong>${roomId}</strong></p>
+                            <p>Waiting for the room creator to set up the connection...</p>
+                            <p>This may take a moment. Please keep this tab open.</p>
+                        </div>
+                    `;
+                    
+                    // Set up a listener to check for an offer
+                    window.checkForOffer = setInterval(() => {
+                        const newOfferJson = localStorage.getItem(`offer_${roomId}`);
+                        if (newOfferJson) {
+                            clearInterval(window.checkForOffer);
+                            joinLocalRoom(roomId); // Retry with the offer now available
+                        }
+                    }, 1000);
+                }
+            } catch (error) {
+                console.error("Error joining local room:", error);
+                document.getElementById('roomInfo').innerHTML = `
+                    <div class="room-details" style="color: red;">
+                        <h3>Error Joining Room</h3>
+                        <p>${error.message}</p>
+                        <button onclick="window.location.reload()" style="background: #dc3545;">Try Again</button>
+                    </div>
+                `;
+            }
+        }
+
+        // Add this function to handle direct peer connections
+        async function handleDirectPeerConnection(remoteOffer) {
+            try {
+                // Create peer connection if it doesn't exist
+                if (!peerConnection) {
+                    createPeerConnection();
+                }
+                
+                // Set the remote description
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(remoteOffer)));
+                
+                // Create an answer
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                
+                // Display the answer for manual sharing
+                const answerString = JSON.stringify(answer);
+                
+                document.getElementById('roomInfo').innerHTML += `
+                    <div class="alert" style="background-color: #d4edda; padding: 10px; border-radius: 4px; margin: 10px 0;">
+                        <p><strong>Connection established!</strong></p>
+                        <p>You should now see the remote video once the connection is complete.</p>
+                    </div>
+                `;
+                
+                return answerString;
+            } catch (error) {
+                console.error("Error handling direct peer connection:", error);
+                throw error;
+            }
+        }
+
+        // Add this function to handle ICE candidate exchange for local rooms
+        function setupLocalIceCandidateExchange() {
+            // Store ICE candidates in localStorage
+            peerConnection.onicecandidate = event => {
+                if (event.candidate) {
+                    // Get existing candidates
+                    let candidates = JSON.parse(localStorage.getItem(`ice_${currentRoomId}_${socket.id}`) || '[]');
+                    candidates.push(event.candidate);
+                    localStorage.setItem(`ice_${currentRoomId}_${socket.id}`, JSON.stringify(candidates));
+                }
+            };
+            
+            // Set up a listener to check for remote ICE candidates
+            window.checkForIceCandidates = setInterval(() => {
+                // The remote ID is anything other than our socket ID
+                const keys = Object.keys(localStorage);
+                for (const key of keys) {
+                    if (key.startsWith(`ice_${currentRoomId}_`) && !key.endsWith(socket.id)) {
+                        try {
+                            const candidates = JSON.parse(localStorage.getItem(key) || '[]');
+                            if (candidates.length > 0) {
+                                // Process each candidate
+                                for (const candidate of candidates) {
+                                    peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
+                                        .catch(err => console.error("Error adding ICE candidate:", err));
+                                }
+                                // Clear processed candidates
+                                localStorage.setItem(key, '[]');
+                            }
+                        } catch (error) {
+                            console.error("Error processing ICE candidates:", error);
+                        }
+                    }
+                }
+            }, 1000);
+        }
+    </script>
+</body>
+</html> 
