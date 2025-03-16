@@ -318,6 +318,56 @@ def handle_simple_create_room():
         print(f"[Simple Room Creation Error] {error_msg}")
         emit('error', {'message': error_msg}, to=request.sid)
 
+@socketio.on('recognize-gesture')
+def recognize_gesture(data):
+    # Extract the frame from the data
+    frame_data = data.get('frame')
+    room_id = data.get('roomId')
+    
+    if not frame_data or not room_id:
+        return
+    
+    try:
+        # Convert the base64 image to a numpy array
+        image_data = frame_data.split(',')[1]
+        image_bytes = base64.b64decode(image_data)
+        np_arr = np.frombuffer(image_bytes, np.uint8)
+        image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        
+        # Process the image for hand landmarks
+        image = cv2.flip(image, 1)  # Mirror image
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        # Process with MediaPipe
+        results = hands.process(image)
+        
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                # Extract landmarks
+                landmark_list = calc_landmark_list(image, hand_landmarks)
+                
+                # Pre-process landmarks
+                pre_processed_landmark_list = pre_process_landmark(landmark_list)
+                
+                # Classify hand gesture
+                hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
+                
+                # Get the gesture name
+                gesture_name = keypoint_classifier_labels[hand_sign_id]
+                
+                # Send the result back to the client
+                emit('gesture-recognition-result', {
+                    'gesture': gesture_name
+                })
+                
+                # Also store in gesture history
+                store_gesture(room_id, request.sid, gesture_name)
+                
+                # Only process the first hand for simplicity
+                break
+    except Exception as e:
+        print(f"Error in gesture recognition: {e}")
+
 if __name__ == '__main__':
     print("Starting Gesture Recognition Server...")
     print("Make sure MongoDB is running and .env is configured correctly")
