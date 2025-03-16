@@ -222,8 +222,20 @@
                                     <p><strong>Connection successful!</strong></p>
                                     <p>You are now connected with the other participant.</p>
                                 </div>
+                                ${isRoomCreator() ? `
+                                <div style="margin-top: 20px; text-align: center;">
+                                    <button onclick="createAndSendOffer()" style="background: #007bff;">
+                                        Reconnect if Needed
+                                    </button>
+                                </div>
+                                ` : ''}
                             </div>
                         `;
+                        
+                        // Clear any request offer interval
+                        if (window.requestOfferInterval) {
+                            clearInterval(window.requestOfferInterval);
+                        }
                     }
                 };
 
@@ -242,9 +254,36 @@
                     }
                 };
                 
-                // Log connection state changes
+                // Log connection state changes and update UI
                 peerConnection.oniceconnectionstatechange = () => {
-                    console.log('ICE connection state changed to:', peerConnection.iceConnectionState);
+                    const state = peerConnection.iceConnectionState;
+                    console.log('ICE connection state changed to:', state);
+                    
+                    // Update the connection status display
+                    updateConnectionStatus(state);
+                    
+                    // Handle specific states
+                    if (state === 'connected' || state === 'completed') {
+                        console.log('Connection established successfully');
+                        
+                        // Clear any intervals
+                        if (window.requestOfferInterval) {
+                            clearInterval(window.requestOfferInterval);
+                        }
+                        if (window.offerInterval) {
+                            clearInterval(window.offerInterval);
+                        }
+                    } else if (state === 'failed') {
+                        console.error('Connection failed');
+                        
+                        // If we're the creator, try to send a new offer after a delay
+                        if (isRoomCreator()) {
+                            setTimeout(() => {
+                                console.log('Attempting to recover from failed connection');
+                                createAndSendOffer();
+                            }, 2000);
+                        }
+                    }
                 };
                 
                 return peerConnection;
@@ -992,7 +1031,7 @@
             }
         }
 
-        // Update the createLocalRoom function to set the creator flag
+        // Update the createLocalRoom function to add a manual connection button
         function createLocalRoom() {
             console.log('Creating new room with Scaledrone signaling');
             
@@ -1046,6 +1085,11 @@
                                 <p><strong>Or scan this QR code to join:</strong></p>
                                 <img src="${qrCodeUrl}" alt="Room QR Code" style="max-width: 150px; margin: 10px auto;">
                             </div>
+                            <div style="margin-top: 20px; text-align: center;">
+                                <button onclick="createAndSendOffer()" style="background: #007bff;">
+                                    Send Connection Offer Manually
+                                </button>
+                            </div>
                         </div>
                     `;
                     
@@ -1079,7 +1123,7 @@
             });
         }
 
-        // Update the setupPublicSignaling function to detect when members join the room
+        // Update the setupPublicSignaling function
         function setupPublicSignaling(roomId) {
             return new Promise((resolve, reject) => {
                 console.log("Setting up Scaledrone signaling for room:", roomId);
@@ -1140,23 +1184,22 @@
                                     console.log('We are the room creator, sending offer to new participant');
                                     createAndSendOffer();
                                 }
-                            }
-                        });
-                        
-                        // Set up member tracking to detect when someone joins
-                        room.on('members', members => {
-                            console.log('Current room members:', members);
-                            
-                            // Store the members list
-                            window.roomMembers = members;
-                            
-                            // If we're joining (not creating) and there are other members, send a join notification
-                            if (!isRoomCreator() && members.length > 1) {
-                                console.log('Sending join notification to room creator');
-                                sendSignalingMessage({
-                                    type: 'join-notification',
-                                    message: 'New participant joined'
-                                });
+                            } else if (message.type === 'request-offer') {
+                                console.log('Received request for offer');
+                                // If we're the room creator, send an offer
+                                if (isRoomCreator()) {
+                                    console.log('We are the room creator, sending offer in response to request');
+                                    createAndSendOffer();
+                                }
+                            } else if (message.type === 'presence') {
+                                console.log('Received presence notification from:', message.clientId);
+                                // If we're not the creator and we just joined, request an offer
+                                if (!isRoomCreator() && !window.offerRequested) {
+                                    window.offerRequested = true;
+                                    setTimeout(() => {
+                                        announcePresenceAndRequestOffer();
+                                    }, 1000); // Wait a second before requesting an offer
+                                }
                             }
                         });
                         
@@ -1165,6 +1208,13 @@
                             type: 'presence',
                             message: 'Participant active in room'
                         });
+                        
+                        // If we're joining (not creating), request an offer after a short delay
+                        if (!isRoomCreator()) {
+                            setTimeout(() => {
+                                announcePresenceAndRequestOffer();
+                            }, 2000); // Wait 2 seconds before requesting an offer
+                        }
                         
                         resolve(drone);
                     });
@@ -1183,10 +1233,25 @@
             return window.isCreator === true;
         }
 
-        // Add a function to create and send an offer
+        // Improve the createAndSendOffer function
         async function createAndSendOffer() {
             try {
                 console.log('Creating new offer to send to participant');
+                
+                // Make sure we have a peer connection
+                if (!peerConnection) {
+                    console.log('Creating peer connection before sending offer');
+                    createPeerConnection();
+                }
+                
+                // Reset the connection if it's in a failed state
+                if (peerConnection.iceConnectionState === 'failed' || 
+                    peerConnection.iceConnectionState === 'disconnected' ||
+                    peerConnection.iceConnectionState === 'closed') {
+                    console.log('Resetting peer connection before creating new offer');
+                    peerConnection.close();
+                    createPeerConnection();
+                }
                 
                 // Create an offer
                 const offer = await peerConnection.createOffer({
@@ -1204,8 +1269,25 @@
                 });
                 
                 console.log('New offer sent via Scaledrone');
+                
+                // Update UI to show offer was sent
+                const statusElement = document.getElementById('offerStatus');
+                if (statusElement) {
+                    statusElement.textContent = 'Offer sent at ' + new Date().toLocaleTimeString();
+                } else {
+                    const roomInfo = document.querySelector('.room-details');
+                    if (roomInfo) {
+                        const statusDiv = document.createElement('div');
+                        statusDiv.id = 'offerStatus';
+                        statusDiv.style.marginTop = '10px';
+                        statusDiv.style.color = '#28a745';
+                        statusDiv.textContent = 'Offer sent at ' + new Date().toLocaleTimeString();
+                        roomInfo.appendChild(statusDiv);
+                    }
+                }
             } catch (error) {
                 console.error('Error creating and sending offer:', error);
+                alert('Error sending offer: ' + error.message);
             }
         }
 
@@ -1363,11 +1445,14 @@
             }
         }
 
-        // Fix the joinLocalRoom function
+        // Update the joinLocalRoom function
         async function joinLocalRoom(roomId) {
             console.log('Joining room:', roomId);
             
             try {
+                // Set flag to indicate we're NOT the room creator
+                window.isCreator = false;
+                
                 // Initialize media if not already done
                 if (!localStream) {
                     await initializeMedia();
@@ -1398,6 +1483,7 @@
                         <p>Room ID: <strong>${roomId}</strong></p>
                         <p>Connected to signaling service. Waiting for the room creator...</p>
                         <p>This may take a moment. Please keep this tab open.</p>
+                        <button onclick="announcePresenceAndRequestOffer()" style="background: #007bff;">Request Connection</button>
                     </div>
                 `;
                 
@@ -1415,21 +1501,91 @@
             }
         }
 
-        // Add this function to help debug connection issues
-        function debugConnectionState() {
-            console.log('===== CONNECTION DEBUG INFO =====');
-            console.log('ICE Connection State:', peerConnection ? peerConnection.iceConnectionState : 'No peer connection');
-            console.log('Signaling State:', peerConnection ? peerConnection.signalingState : 'No peer connection');
-            console.log('Room Members:', window.roomMembers ? window.roomMembers.length : 'No members info');
-            console.log('Is Creator:', window.isCreator === true ? 'Yes' : 'No');
-            console.log('Room ID:', currentRoomId);
-            console.log('Local Stream:', localStream ? 'Available' : 'Not available');
-            console.log('Remote Stream:', document.getElementById('remoteVideo').srcObject ? 'Available' : 'Not available');
-            console.log('================================');
+        // Add this function to update the connection status display
+        function updateConnectionStatus(state) {
+            const connectionStatus = document.getElementById('connectionStatus');
+            if (!connectionStatus) {
+                const statusDiv = document.createElement('div');
+                statusDiv.id = 'connectionStatus';
+                statusDiv.style.padding = '10px';
+                statusDiv.style.marginTop = '15px';
+                statusDiv.style.borderRadius = '4px';
+                
+                const roomInfo = document.querySelector('.room-details');
+                if (roomInfo) {
+                    roomInfo.appendChild(statusDiv);
+                }
+            }
+            
+            const statusElement = document.getElementById('connectionStatus');
+            if (statusElement) {
+                let color = '#f8d7da'; // Red background
+                let textColor = '#721c24'; // Red text
+                let message = 'Disconnected';
+                
+                switch (state) {
+                    case 'new':
+                        color = '#fff3cd'; // Yellow background
+                        textColor = '#856404'; // Yellow text
+                        message = 'Connection setup in progress...';
+                        break;
+                    case 'checking':
+                        color = '#fff3cd'; // Yellow background
+                        textColor = '#856404'; // Yellow text
+                        message = 'Checking connection...';
+                        break;
+                    case 'connected':
+                    case 'completed':
+                        color = '#d4edda'; // Green background
+                        textColor = '#155724'; // Green text
+                        message = 'Connected successfully!';
+                        break;
+                    case 'disconnected':
+                        message = 'Connection temporarily disconnected. Trying to reconnect...';
+                        break;
+                    case 'failed':
+                        message = 'Connection failed. Please try again.';
+                        break;
+                    case 'closed':
+                        message = 'Connection closed.';
+                        break;
+                }
+                
+                statusElement.style.backgroundColor = color;
+                statusElement.style.color = textColor;
+                statusElement.innerHTML = `
+                    <strong>Connection Status:</strong> ${message}
+                    <div style="font-size: 12px; margin-top: 5px;">
+                        Last updated: ${new Date().toLocaleTimeString()}
+                    </div>
+                `;
+            }
         }
 
-        // Call this function periodically to monitor the connection state
-        setInterval(debugConnectionState, 5000);
+        // Add this function to your code
+        function announcePresenceAndRequestOffer() {
+            console.log('Announcing presence and requesting offer from room creator');
+            
+            // Send a direct request for an offer
+            sendSignalingMessage({
+                type: 'request-offer',
+                message: 'New participant requesting offer'
+            });
+            
+            // Set up a timer to retry if we don't get a response
+            window.requestOfferInterval = setInterval(() => {
+                if (peerConnection.iceConnectionState === 'new') {
+                    console.log('Still waiting for offer, sending another request');
+                    sendSignalingMessage({
+                        type: 'request-offer',
+                        message: 'New participant requesting offer (retry)'
+                    });
+                } else {
+                    console.log('Connection in progress or established, stopping request interval');
+                    clearInterval(window.requestOfferInterval);
+                }
+            }, 3000); // Retry every 3 seconds
+        }
     </script>
 </body>
 </html> 
