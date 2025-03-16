@@ -165,7 +165,18 @@
                 { urls: 'stun:stun1.l.google.com:19302' },
                 { urls: 'stun:stun2.l.google.com:19302' },
                 { urls: 'stun:stun3.l.google.com:19302' },
-                { urls: 'stun:stun4.l.google.com:19302' }
+                { urls: 'stun:stun4.l.google.com:19302' },
+                // Add these free TURN servers for better connectivity
+                {
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                }
             ],
             iceCandidatePoolSize: 10
         };
@@ -201,16 +212,23 @@
                     }
                 };
 
-                // For local rooms, we need to handle ICE candidates differently
-                if (isUsingLocalRoom()) {
-                    setupLocalIceCandidateExchange();
-                } else {
-                    peerConnection.onicecandidate = event => {
-                        if (event.candidate) {
+                // For local rooms, use Scaledrone for ICE candidates
+                peerConnection.onicecandidate = event => {
+                    if (event.candidate) {
+                        console.log("Generated ICE candidate");
+                        
+                        // If we're using a local room with Scaledrone
+                        if (isUsingLocalRoom() && window.signalingDrone) {
+                            sendSignalingMessage({
+                                type: 'candidate',
+                                candidate: event.candidate
+                            });
+                        } else {
+                            // For server rooms, send to the server
                             socket.emit('ice-candidate', event.candidate);
                         }
-                    };
-                }
+                    }
+                };
                 
                 // Log connection state changes
                 peerConnection.oniceconnectionstatechange = () => {
@@ -962,20 +980,16 @@
             }
         }
 
-        // Update the createLocalRoom function to generate a shareable link
+        // Update the createLocalRoom function to mention Scaledrone
         function createLocalRoom() {
-            console.log("Creating room locally");
+            console.log("Creating room locally with Scaledrone signaling");
             
             // Generate a random room ID
             const roomId = Math.random().toString(36).substring(2, 10);
             
-            // Create a proper shareable URL - use the actual deployed URL instead of localhost
-            // If you're testing locally, you'll need to deploy this to a public server
-            const baseUrl = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost' 
-                ? 'https://yourusername.github.io/sign-language-detection/client/' // Replace with your actual GitHub Pages URL
-                : window.location.origin + window.location.pathname;
-            
-            const roomUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}room=${roomId}`;
+            // Create a proper shareable URL using the actual deployed GitHub Pages URL
+            const baseUrl = 'https://gandreti20.github.io/Sign_Lang_detection/';
+            const roomUrl = `${baseUrl}?room=${roomId}`;
             
             // Create a QR code for easy mobile access
             const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(roomUrl)}`;
@@ -984,27 +998,22 @@
                 <div class="room-details">
                     <h3>Local Room Created! 🎉</h3>
                     <p>Room ID: <strong>${roomId}</strong></p>
-                    <div class="alert" style="background-color: #fff3cd; padding: 10px; border-radius: 4px; margin: 10px 0;">
-                        <p><strong>Important:</strong> To share this room with others:</p>
-                        <ol style="margin-left: 20px;">
-                            <li>You need to deploy this app to a public web server</li>
-                            <li>Both you and your partner need to access the app from the same public URL</li>
-                            <li>Local rooms only work when both users can access the same website</li>
-                        </ol>
-                        <p>For testing, you can use services like <a href="https://ngrok.com/" target="_blank">ngrok</a> or <a href="https://github.com/pages/" target="_blank">GitHub Pages</a>.</p>
+                    <div class="alert" style="background-color: #d4edda; padding: 10px; border-radius: 4px; margin: 10px 0;">
+                        <p><strong>Success:</strong> Your room is ready to share!</p>
+                        <p>This room uses Scaledrone for signaling between peers.</p>
                     </div>
                     <div class="share-link">
-                        <p><strong>Room ID to share:</strong></p>
+                        <p><strong>Share this link with others:</strong></p>
                         <div style="display: flex; gap: 10px; margin: 10px 0;">
-                            <input type="text" value="${roomId}" 
+                            <input type="text" value="${roomUrl}" 
                                    readonly id="roomLink" 
                                    style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                             <button onclick="copyRoomLink()" class="copy-button" 
-                                    style="background: #28a745;">Copy ID</button>
+                                    style="background: #28a745;">Copy Link</button>
                         </div>
                     </div>
                     <div style="text-align: center; margin: 15px 0;">
-                        <p><strong>QR Code (only works with deployed app):</strong></p>
+                        <p><strong>Or scan this QR code to join:</strong></p>
                         <img src="${qrCodeUrl}" alt="Room QR Code" style="max-width: 150px; margin: 10px auto;">
                     </div>
                 </div>
@@ -1013,7 +1022,7 @@
             // Set current room ID
             currentRoomId = roomId;
             
-            // Create peer connection and set up local signaling
+            // Create peer connection and set up Scaledrone signaling
             createPeerConnection();
             setupLocalPeerConnection();
             
@@ -1026,8 +1035,8 @@
 
         // Add this function to use a public signaling service
         async function setupPublicSignaling(roomId) {
-            // Use a free public signaling service like Scaledrone
-            const drone = new ScaleDrone('YOUR_CHANNEL_ID'); // Sign up at scaledrone.com for a free channel ID
+            // Use your Scaledrone channel ID
+            const drone = new ScaleDrone('Xw9M4ArOLsh59WOa'); 
             
             drone.on('open', error => {
                 if (error) {
@@ -1148,16 +1157,19 @@
         function setupIceCandidateHandling() {
             peerConnection.onicecandidate = event => {
                 if (event.candidate) {
+                    console.log("Generated ICE candidate", event.candidate.candidate.substr(0, 50) + "...");
                     // Send the ICE candidate through the signaling service
                     sendSignalingMessage({
                         type: 'candidate',
                         candidate: event.candidate
                     });
+                } else {
+                    console.log("ICE candidate generation complete");
                 }
             };
         }
 
-        // Update the joinLocalRoom function to use the local signaling mechanism
+        // Update the joinLocalRoom function to use Scaledrone
         async function joinLocalRoom(roomId) {
             console.log("Joining local room:", roomId);
             
@@ -1173,57 +1185,22 @@
                 // Create peer connection
                 createPeerConnection();
                 
-                // Check for an offer in localStorage
-                const offerJson = localStorage.getItem(`offer_${roomId}`);
-                if (offerJson) {
-                    try {
-                        const offer = JSON.parse(offerJson);
-                        
-                        // Set the remote description
-                        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-                        
-                        // Create an answer
-                        const answer = await peerConnection.createAnswer();
-                        await peerConnection.setLocalDescription(answer);
-                        
-                        // Store the answer in localStorage
-                        localStorage.setItem(`answer_${roomId}`, JSON.stringify(answer));
-                        
-                        document.getElementById('roomInfo').innerHTML = `
-                            <div class="room-details">
-                                <h3>Joined Local Room! 🎉</h3>
-                                <p>Room ID: <strong>${roomId}</strong></p>
-                                <div class="alert" style="background-color: #d4edda; padding: 10px; border-radius: 4px; margin: 10px 0;">
-                                    <p><strong>Connection established!</strong></p>
-                                    <p>You should now see the remote video once the connection is complete.</p>
-                                </div>
-                            </div>
-                        `;
-                        
-                        console.log("Local room joined, answer created");
-                    } catch (error) {
-                        console.error("Error processing offer:", error);
-                        throw error;
-                    }
-                } else {
-                    document.getElementById('roomInfo').innerHTML = `
-                        <div class="room-details" style="color: orange;">
-                            <h3>Waiting for Room Creator</h3>
-                            <p>Room ID: <strong>${roomId}</strong></p>
-                            <p>Waiting for the room creator to set up the connection...</p>
-                            <p>This may take a moment. Please keep this tab open.</p>
-                        </div>
-                    `;
-                    
-                    // Set up a listener to check for an offer
-                    window.checkForOffer = setInterval(() => {
-                        const newOfferJson = localStorage.getItem(`offer_${roomId}`);
-                        if (newOfferJson) {
-                            clearInterval(window.checkForOffer);
-                            joinLocalRoom(roomId); // Retry with the offer now available
-                        }
-                    }, 1000);
-                }
+                // Set up signaling with Scaledrone
+                await setupPublicSignaling(roomId);
+                
+                document.getElementById('roomInfo').innerHTML = `
+                    <div class="room-details" style="color: orange;">
+                        <h3>Waiting for Room Creator</h3>
+                        <p>Room ID: <strong>${roomId}</strong></p>
+                        <p>Connected to signaling service. Waiting for the room creator...</p>
+                        <p>This may take a moment. Please keep this tab open.</p>
+                    </div>
+                `;
+                
+                console.log("Joined room with Scaledrone signaling, waiting for offer");
+                
+                // The offer will be received through the Scaledrone data event handler
+                // which is set up in the setupPublicSignaling function
             } catch (error) {
                 console.error("Error joining local room:", error);
                 document.getElementById('roomInfo').innerHTML = `
@@ -1303,6 +1280,78 @@
                     }
                 }
             }, 1000);
+        }
+
+        // Add this simplified signaling function that uses localStorage but with better error handling
+        async function setupSimplifiedSignaling(roomId) {
+            console.log("Setting up simplified signaling for room:", roomId);
+            
+            // Clear any existing data for this room
+            localStorage.removeItem(`offer_${roomId}`);
+            localStorage.removeItem(`answer_${roomId}`);
+            
+            // Create a timestamp to identify this session
+            const sessionId = Date.now().toString();
+            localStorage.setItem(`session_${roomId}`, sessionId);
+            
+            // Set up a heartbeat to let others know this session is active
+            setInterval(() => {
+                localStorage.setItem(`heartbeat_${roomId}_${sessionId}`, Date.now().toString());
+            }, 2000);
+            
+            // Return the session ID for reference
+            return sessionId;
+        }
+
+        // Replace the setupLocalPeerConnection function with this simplified version
+        async function setupLocalPeerConnection() {
+            if (!peerConnection) {
+                createPeerConnection();
+            }
+            
+            // Set up simplified signaling
+            const sessionId = await setupSimplifiedSignaling(currentRoomId);
+            
+            try {
+                // Create an offer
+                const offer = await peerConnection.createOffer({
+                    offerToReceiveAudio: true,
+                    offerToReceiveVideo: true
+                });
+                
+                await peerConnection.setLocalDescription(offer);
+                
+                // Store the offer in localStorage with the session ID
+                localStorage.setItem(`offer_${currentRoomId}`, JSON.stringify({
+                    offer: offer,
+                    sessionId: sessionId,
+                    timestamp: Date.now()
+                }));
+                
+                console.log("Local peer connection setup complete, offer created");
+                
+                // Set up a listener for the answer
+                window.checkForAnswer = setInterval(() => {
+                    try {
+                        const answerData = JSON.parse(localStorage.getItem(`answer_${currentRoomId}`) || 'null');
+                        if (answerData && answerData.sessionId === sessionId) {
+                            clearInterval(window.checkForAnswer);
+                            
+                            // Apply the answer
+                            peerConnection.setRemoteDescription(new RTCSessionDescription(answerData.answer))
+                                .then(() => console.log("Remote description set successfully"))
+                                .catch(err => console.error("Error setting remote description:", err));
+                            
+                            // Clear the answer
+                            localStorage.removeItem(`answer_${currentRoomId}`);
+                        }
+                    } catch (error) {
+                        console.error("Error checking for answer:", error);
+                    }
+                }, 1000);
+            } catch (error) {
+                console.error("Error setting up local peer connection:", error);
+            }
         }
     </script>
 </body>
