@@ -213,7 +213,10 @@
                         console.log('Setting remote video stream');
                         remoteVideo.srcObject = event.streams[0];
                         
-                        // Update UI to show connection is successful
+                        // Start gesture recognition on both local and remote videos
+                        performGestureRecognition(document.getElementById('localVideo'), document.getElementById('localTranslation'));
+                        
+                        // Update UI to show connection is successful and add end meeting button
                         document.getElementById('roomInfo').innerHTML = `
                             <div class="room-details">
                                 <h3>Connected! 🎉</h3>
@@ -221,14 +224,18 @@
                                 <div class="alert" style="background-color: #d4edda; padding: 10px; border-radius: 4px; margin: 10px 0;">
                                     <p><strong>Connection successful!</strong></p>
                                     <p>You are now connected with the other participant.</p>
+                                    <p>Sign language gestures will be detected and displayed automatically.</p>
                                 </div>
-                                ${isRoomCreator() ? `
-                                <div style="margin-top: 20px; text-align: center;">
+                                <div style="display: flex; justify-content: space-between; margin-top: 20px;">
+                                    ${isRoomCreator() ? `
                                     <button onclick="createAndSendOffer()" style="background: #007bff;">
                                         Reconnect if Needed
                                     </button>
+                                    ` : ''}
+                                    <button onclick="endMeeting()" style="background: #dc3545;">
+                                        End Meeting
+                                    </button>
                                 </div>
-                                ` : ''}
                             </div>
                         `;
                         
@@ -677,6 +684,12 @@
                 document.getElementById('remoteTranslation');
             
             translationElement.textContent = data.gesture.translation;
+            
+            // Share the gesture with the other participant
+            if (data.userId === socket.id) {
+                shareGestureDetection(data.gesture.translation);
+            }
+            
             setTimeout(() => {
                 translationElement.textContent = '';
             }, 3000);
@@ -1200,6 +1213,10 @@
                                         announcePresenceAndRequestOffer();
                                     }, 1000); // Wait a second before requesting an offer
                                 }
+                            } else if (message.type === 'gesture-detected') {
+                                console.log('Received gesture detection from peer:', message.gesture);
+                                // Display the gesture on the remote video
+                                displayRemoteGesture(message.gesture);
                             }
                         });
                         
@@ -1227,7 +1244,7 @@
             });
         }
 
-        // Add a function to check if we're the room creator
+        // Add this function to check if we're the room creator
         function isRoomCreator() {
             // If we created the room, we'll have a flag set
             return window.isCreator === true;
@@ -1586,6 +1603,152 @@
                 }
             }, 3000); // Retry every 3 seconds
         }
+
+        // Add this function to handle ending the meeting
+        function endMeeting() {
+            console.log('Ending meeting...');
+            
+            // Stop gesture recognition
+            stopGestureRecognition();
+            
+            // Close peer connection if it exists
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            
+            // Stop all tracks in the local stream
+            if (localStream) {
+                localStream.getTracks().forEach(track => {
+                    track.stop();
+                });
+                localStream = null;
+            }
+            
+            // Clear the video elements
+            document.getElementById('localVideo').srcObject = null;
+            document.getElementById('remoteVideo').srcObject = null;
+            
+            // Disconnect from Scaledrone
+            if (window.signalingDrone) {
+                window.signalingDrone.close();
+            }
+            
+            // Clear any intervals
+            if (window.requestOfferInterval) clearInterval(window.requestOfferInterval);
+            if (window.offerInterval) clearInterval(window.offerInterval);
+            if (window.checkForIceCandidates) clearInterval(window.checkForIceCandidates);
+            if (window.frameDetectionInterval) clearInterval(window.frameDetectionInterval);
+            
+            // Reset room ID
+            currentRoomId = null;
+            
+            // Update UI to show meeting ended
+            document.getElementById('roomInfo').innerHTML = `
+                <div class="room-details">
+                    <h3>Meeting Ended</h3>
+                    <p>You have left the meeting.</p>
+                    <button onclick="window.location.reload()" style="background: #28a745;">Start New Meeting</button>
+                </div>
+            `;
+        }
+
+        // Add this function to share detected gestures
+        function shareGestureDetection(gesture) {
+            // Only share if we have a connection and a gesture
+            if (peerConnection && peerConnection.iceConnectionState === 'connected' && gesture) {
+                console.log('Sharing gesture detection with peer:', gesture);
+                
+                // Send the gesture via Scaledrone
+                sendSignalingMessage({
+                    type: 'gesture-detected',
+                    gesture: gesture
+                });
+            }
+        }
+
+        // Add this function to display remote gestures
+        function displayRemoteGesture(gesture) {
+            const remoteTranslation = document.getElementById('remoteTranslation');
+            if (remoteTranslation) {
+                remoteTranslation.textContent = gesture;
+                
+                // Clear the text after 3 seconds
+                setTimeout(() => {
+                    remoteTranslation.textContent = '';
+                }, 3000);
+            }
+        }
+
+        // Add this function to perform gesture recognition on video frames
+        function performGestureRecognition(videoElement, translationElement) {
+            // Create a canvas to capture video frames
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Set up the recognition interval
+            const recognitionInterval = setInterval(() => {
+                // Check if the video is playing and the peer connection is established
+                if (videoElement.paused || videoElement.ended || !videoElement.videoWidth) {
+                    return;
+                }
+                
+                // Resize canvas to match video dimensions
+                canvas.width = videoElement.videoWidth;
+                canvas.height = videoElement.videoHeight;
+                
+                // Draw the current video frame to the canvas
+                ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+                
+                // Get the image data from the canvas
+                const imageData = canvas.toDataURL('image/jpeg', 0.8);
+                
+                // Send the frame for server-side gesture recognition
+                if (socket.connected) {
+                    socket.emit('recognize-gesture', {
+                        frame: imageData,
+                        roomId: currentRoomId
+                    });
+                }
+            }, 200); // Process every 200ms to reduce CPU usage
+            
+            // Store the interval ID for cleanup
+            window.gestureRecognitionInterval = recognitionInterval;
+        }
+
+        // Add this function to stop gesture recognition
+        function stopGestureRecognition() {
+            if (window.gestureRecognitionInterval) {
+                clearInterval(window.gestureRecognitionInterval);
+                window.gestureRecognitionInterval = null;
+            }
+        }
+
+        // Add this socket event handler for gesture recognition results
+        socket.on('gesture-recognition-result', data => {
+            console.log('Received gesture recognition result:', data);
+            
+            // Display the recognized gesture
+            if (data.gesture) {
+                const translationElement = document.getElementById('localTranslation');
+                translationElement.textContent = data.gesture;
+                
+                // Share the gesture with the other participant
+                shareGestureDetection(data.gesture);
+                
+                // Clear the text after 3 seconds
+                setTimeout(() => {
+                    translationElement.textContent = '';
+                }, 3000);
+                
+                // Add to gesture history
+                addGestureToHistory({
+                    userId: socket.id,
+                    gesture: { translation: data.gesture },
+                    timestamp: Date.now()
+                });
+            }
+        });
     </script>
 </body>
 </html> 
