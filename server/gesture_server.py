@@ -53,35 +53,50 @@ point_history_classifier_labels = []
 def load_labels():
     global keypoint_classifier_labels, point_history_classifier_labels
     
+    # List all files in the server directory to help with debugging
+    print("Files in server directory:")
+    for root, dirs, files in os.walk(server_dir):
+        for file in files:
+            if file.endswith('.csv'):
+                print(f"Found CSV file: {os.path.join(root, file)}")
+    
     # Path to keypoint classifier labels
     keypoint_label_path = os.path.join(server_dir, 'model', 'keypoint_classifier_label.csv')
     # If file doesn't exist in server/model, try to use the one from outside server
     if not os.path.exists(keypoint_label_path):
         keypoint_label_path = os.path.join(os.path.dirname(server_dir), 'model', 'keypoint_classifier', 'keypoint_classifier_label.csv')
+        print(f"Trying alternative keypoint label path: {keypoint_label_path}")
     
     # Path to point history classifier labels
     point_history_label_path = os.path.join(server_dir, 'model', 'point_history_classifier_label.csv')
     # If file doesn't exist in server/model, try to use the one from outside server
     if not os.path.exists(point_history_label_path):
         point_history_label_path = os.path.join(os.path.dirname(server_dir), 'model', 'point_history_classifier', 'point_history_classifier_label.csv')
+        print(f"Trying alternative point history label path: {point_history_label_path}")
     
     # Load keypoint classifier labels
     if os.path.exists(keypoint_label_path):
         with open(keypoint_label_path, 'r', encoding='utf-8') as f:
             keypoint_classifier_labels = [line.strip() for line in f]
         print(f"Loaded {len(keypoint_classifier_labels)} keypoint classifier labels from {keypoint_label_path}")
+        print(f"Labels: {keypoint_classifier_labels}")
     else:
         print(f"Warning: Keypoint classifier label file not found at {keypoint_label_path}")
-        keypoint_classifier_labels = ["Unknown"]
+        # Hardcode the labels as a fallback
+        keypoint_classifier_labels = ["Hello", "Small", "Super", "Luck", "Love", "Victory", "Call me", "Prosper", "Power", "Home"]
+        print(f"Using hardcoded labels: {keypoint_classifier_labels}")
     
     # Load point history classifier labels
     if os.path.exists(point_history_label_path):
         with open(point_history_label_path, 'r', encoding='utf-8') as f:
             point_history_classifier_labels = [line.strip() for line in f]
         print(f"Loaded {len(point_history_classifier_labels)} point history classifier labels from {point_history_label_path}")
+        print(f"Labels: {point_history_classifier_labels}")
     else:
         print(f"Warning: Point history classifier label file not found at {point_history_label_path}")
-        point_history_classifier_labels = ["Unknown"]
+        # Hardcode the labels as a fallback
+        point_history_classifier_labels = ["Circle", "Square", "Triangle", "Wave", "Letter S", "Letter V", "Cross"]
+        print(f"Using hardcoded labels: {point_history_classifier_labels}")
 
 # Call the function to load labels
 load_labels()
