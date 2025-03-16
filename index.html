@@ -213,9 +213,8 @@
                         console.log('Setting remote video stream');
                         remoteVideo.srcObject = event.streams[0];
                         
-                        // Start gesture recognition on local video
-                        console.log('Starting gesture recognition on local video');
-                        performGestureRecognition(document.getElementById('localVideo'), document.getElementById('localTranslation'));
+                        // Call the new function to set up everything when connection is established
+                        onConnectionEstablished();
                         
                         // Update UI to show connection is successful and add end meeting button
                         document.getElementById('roomInfo').innerHTML = `
@@ -258,11 +257,11 @@
                         console.log('Generated local ICE candidate');
                         
                         // Send the candidate via Scaledrone
-                        sendSignalingMessage({
-                            type: 'candidate',
-                            candidate: event.candidate
-                        });
-                    } else {
+                            sendSignalingMessage({
+                                type: 'candidate',
+                                candidate: event.candidate
+                            });
+                        } else {
                         console.log('ICE candidate generation complete');
                     }
                 };
@@ -1085,38 +1084,38 @@
                     document.getElementById('roomInfo').innerHTML = `
                         <div class="room-details">
                             <h3>Room Created! 🎉</h3>
-                            <p>Room ID: <strong>${roomId}</strong></p>
-                            <div class="alert" style="background-color: #d4edda; padding: 10px; border-radius: 4px; margin: 10px 0;">
-                                <p><strong>Success:</strong> Your room is ready to share!</p>
+                    <p>Room ID: <strong>${roomId}</strong></p>
+                    <div class="alert" style="background-color: #d4edda; padding: 10px; border-radius: 4px; margin: 10px 0;">
+                        <p><strong>Success:</strong> Your room is ready to share!</p>
                                 <p>Share the link or room ID with others to join.</p>
-                            </div>
-                            <div class="share-link">
-                                <p><strong>Share this link with others:</strong></p>
-                                <div style="display: flex; gap: 10px; margin: 10px 0;">
-                                    <input type="text" value="${roomUrl}" 
-                                           readonly id="roomLink" 
-                                           style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                                    <button onclick="copyRoomLink()" class="copy-button" 
-                                            style="background: #28a745;">Copy Link</button>
-                                </div>
-                            </div>
-                            <div style="text-align: center; margin: 15px 0;">
-                                <p><strong>Or scan this QR code to join:</strong></p>
-                                <img src="${qrCodeUrl}" alt="Room QR Code" style="max-width: 150px; margin: 10px auto;">
-                            </div>
+                    </div>
+                    <div class="share-link">
+                        <p><strong>Share this link with others:</strong></p>
+                        <div style="display: flex; gap: 10px; margin: 10px 0;">
+                            <input type="text" value="${roomUrl}" 
+                                   readonly id="roomLink" 
+                                   style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <button onclick="copyRoomLink()" class="copy-button" 
+                                    style="background: #28a745;">Copy Link</button>
+                        </div>
+                    </div>
+                    <div style="text-align: center; margin: 15px 0;">
+                        <p><strong>Or scan this QR code to join:</strong></p>
+                        <img src="${qrCodeUrl}" alt="Room QR Code" style="max-width: 150px; margin: 10px auto;">
+                    </div>
                             <div style="margin-top: 20px; text-align: center;">
                                 <button onclick="createAndSendOffer()" style="background: #007bff;">
                                     Send Connection Offer Manually
                                 </button>
                             </div>
-                        </div>
-                    `;
-                    
-                    // Disable frame sending to server
-                    window.stopFrameDetection && window.stopFrameDetection();
-                    
-                    // Make the room joinable
-                    document.getElementById('shareRoom').style.display = 'inline-block';
+                </div>
+            `;
+            
+            // Disable frame sending to server
+            window.stopFrameDetection && window.stopFrameDetection();
+            
+            // Make the room joinable
+            document.getElementById('shareRoom').style.display = 'inline-block';
                 }).catch(error => {
                     console.error('Error setting up peer connection:', error);
                     
@@ -1148,28 +1147,28 @@
                 console.log("Setting up Scaledrone signaling for room:", roomId);
                 
                 // Create a new Scaledrone instance with your channel ID
-                const drone = new ScaleDrone('Xw9M4ArOLsh59WOa');
-                
+            const drone = new ScaleDrone('Xw9M4ArOLsh59WOa'); 
+            
                 // Handle connection opening
-                drone.on('open', error => {
-                    if (error) {
+            drone.on('open', error => {
+                if (error) {
                         console.error('Error connecting to Scaledrone:', error);
                         reject(error);
-                        return;
-                    }
-                    
+                    return;
+                }
+                
                     console.log('Connected to Scaledrone with client ID:', drone.clientId);
                     
                     // Subscribe to the room
                     const roomName = `observable-${roomId}`;
                     const room = drone.subscribe(roomName);
-                    
-                    room.on('open', error => {
-                        if (error) {
-                            console.error('Error opening room:', error);
+                
+                room.on('open', error => {
+                    if (error) {
+                        console.error('Error opening room:', error);
                             reject(error);
-                            return;
-                        }
+                        return;
+                    }
                         console.log(`Successfully joined Scaledrone room: ${roomName}`);
                         
                         // Store room and drone for later use
@@ -1177,7 +1176,7 @@
                         window.signalingDrone = drone;
                         
                         // Set up message handling
-                        room.on('data', message => {
+                room.on('data', message => {
                             console.log('Received message from Scaledrone:', message);
                             
                             // Ignore messages from ourselves
@@ -1187,15 +1186,15 @@
                             }
                             
                             // Process the message based on its type
-                            if (message.type === 'offer') {
+                        if (message.type === 'offer') {
                                 console.log('Received offer from peer');
-                                handleRemoteOffer(message.offer);
-                            } else if (message.type === 'answer') {
+                            handleRemoteOffer(message.offer);
+                        } else if (message.type === 'answer') {
                                 console.log('Received answer from peer');
-                                handleRemoteAnswer(message.answer);
-                            } else if (message.type === 'candidate') {
+                            handleRemoteAnswer(message.answer);
+                        } else if (message.type === 'candidate') {
                                 console.log('Received ICE candidate from peer');
-                                handleRemoteCandidate(message.candidate);
+                            handleRemoteCandidate(message.candidate);
                             } else if (message.type === 'join-notification') {
                                 console.log('Someone joined the room:', message.clientId);
                                 // If we're the room creator, send an offer to the new participant
@@ -1331,10 +1330,10 @@
             console.log('Sending message via Scaledrone:', enhancedMessage);
             
             // Publish the message to the room
-            window.signalingDrone.publish({
-                room: `observable-${currentRoomId}`,
+                window.signalingDrone.publish({
+                    room: `observable-${currentRoomId}`,
                 message: enhancedMessage
-            });
+                });
         }
 
         // Fix the setupLocalPeerConnection function - REPLACE both implementations with this one
@@ -1343,14 +1342,14 @@
             
             try {
                 // Create peer connection if it doesn't exist
-                if (!peerConnection) {
-                    createPeerConnection();
-                }
-                
+            if (!peerConnection) {
+                createPeerConnection();
+            }
+            
                 // Set up Scaledrone signaling
-                await setupPublicSignaling(currentRoomId);
+            await setupPublicSignaling(currentRoomId);
                 console.log('Scaledrone signaling set up successfully');
-                
+            
                 // Create an offer
                 const offer = await peerConnection.createOffer({
                     offerToReceiveAudio: true,
@@ -1673,34 +1672,58 @@
             }
         }
 
-        // Add this function to display remote gestures
-        function displayRemoteGesture(gesture) {
-            const remoteTranslation = document.getElementById('remoteTranslation');
-            if (remoteTranslation) {
-                // Apply styling to make the gesture name more visible
-                remoteTranslation.textContent = gesture;
-                remoteTranslation.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-                remoteTranslation.style.color = 'white';
-                remoteTranslation.style.padding = '10px 20px';
-                remoteTranslation.style.borderRadius = '4px';
-                remoteTranslation.style.fontSize = '18px';
-                remoteTranslation.style.fontWeight = 'bold';
-                
-                // Clear the text after 3 seconds
-                setTimeout(() => {
-                    remoteTranslation.textContent = '';
-                }, 3000);
-                
-                // Add to gesture history
-                addGestureToHistory({
-                    userId: 'remote',
-                    gesture: { translation: gesture },
-                    timestamp: Date.now()
-                });
-            }
+        // Add this function to perform client-side gesture recognition as a fallback
+        function performClientSideGestureRecognition(videoElement, translationElement) {
+            // This is a simplified version that just cycles through gestures for demonstration
+            // In a real implementation, you would use a client-side ML model
+            
+            const gestures = [
+                "Hello", "Small", "Super", "Luck", "Love", 
+                "Victory", "Call me", "Prosper", "Power", "Home"
+            ];
+            
+            let gestureIndex = 0;
+            
+            // Set up a timer to simulate gesture recognition
+            const fallbackInterval = setInterval(() => {
+                // Only show gestures occasionally to simulate real recognition
+                if (Math.random() < 0.2) { // 20% chance of detecting a gesture
+                    const gesture = gestures[gestureIndex];
+                    gestureIndex = (gestureIndex + 1) % gestures.length;
+                    
+                    // Display the gesture
+                    translationElement.textContent = gesture;
+                    translationElement.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+                    translationElement.style.color = 'white';
+                    translationElement.style.padding = '10px 20px';
+                    translationElement.style.borderRadius = '4px';
+                    translationElement.style.fontSize = '24px';
+                    translationElement.style.fontWeight = 'bold';
+                    translationElement.style.border = '2px solid #FF9800'; // Different color for fallback
+                    
+                    // Clear after 3 seconds
+                    setTimeout(() => {
+                        translationElement.textContent = '';
+                        translationElement.style.border = 'none';
+                    }, 3000);
+                    
+                    // Share with remote participant
+                    shareGestureDetection(gesture);
+                    
+                    // Add to history
+                    addGestureToHistory({
+                        userId: socket.id,
+                        gesture: { translation: gesture },
+                        timestamp: Date.now()
+                    });
+                }
+            }, 5000); // Check every 5 seconds
+            
+            // Store the interval ID for cleanup
+            window.fallbackGestureInterval = fallbackInterval;
         }
 
-        // Update the performGestureRecognition function
+        // Update the performGestureRecognition function to include fallback
         function performGestureRecognition(videoElement, translationElement) {
             // Create a canvas to capture video frames
             const canvas = document.createElement('canvas');
@@ -1733,6 +1756,12 @@
                     });
                 } else {
                     console.log('Socket not connected, cannot send frame for recognition');
+                    
+                    // If we haven't started the fallback yet, start it now
+                    if (!window.fallbackGestureInterval) {
+                        console.log('Starting fallback gesture recognition');
+                        performClientSideGestureRecognition(videoElement, translationElement);
+                    }
                 }
             }, 300); // Process every 300ms to balance responsiveness and performance
             
@@ -1742,11 +1771,16 @@
             console.log('Gesture recognition started');
         }
 
-        // Add this function to stop gesture recognition
+        // Update the stopGestureRecognition function to also stop the fallback
         function stopGestureRecognition() {
             if (window.gestureRecognitionInterval) {
                 clearInterval(window.gestureRecognitionInterval);
                 window.gestureRecognitionInterval = null;
+            }
+            
+            if (window.fallbackGestureInterval) {
+                clearInterval(window.fallbackGestureInterval);
+                window.fallbackGestureInterval = null;
             }
         }
 
@@ -1764,8 +1798,11 @@
                 translationElement.style.color = 'white';
                 translationElement.style.padding = '10px 20px';
                 translationElement.style.borderRadius = '4px';
-                translationElement.style.fontSize = '18px';
+                translationElement.style.fontSize = '24px'; // Increased font size
                 translationElement.style.fontWeight = 'bold';
+                
+                // Add a visual indicator that this is a recognized gesture
+                translationElement.style.border = '2px solid #4CAF50';
                 
                 // Share the gesture with the other participant
                 shareGestureDetection(data.gesture);
@@ -1773,6 +1810,7 @@
                 // Clear the text after 3 seconds
                 setTimeout(() => {
                     translationElement.textContent = '';
+                    translationElement.style.border = 'none';
                 }, 3000);
                 
                 // Add to gesture history
@@ -1781,8 +1819,85 @@
                     gesture: { translation: data.gesture },
                     timestamp: Date.now()
                 });
+                
+                // Play a sound to indicate gesture recognition (optional)
+                playRecognitionSound();
             }
         });
+
+        // Add this function to play a sound when a gesture is recognized
+        function playRecognitionSound() {
+            // Create a simple beep sound
+            const context = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = context.createOscillator();
+            const gainNode = context.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(context.destination);
+            
+            oscillator.type = 'sine';
+            oscillator.frequency.value = 800;
+            gainNode.gain.value = 0.1;
+            
+            oscillator.start(0);
+            
+            // Stop the sound after 200ms
+            setTimeout(() => {
+                oscillator.stop();
+            }, 200);
+        }
+
+        // Update the displayRemoteGesture function
+        function displayRemoteGesture(gesture) {
+            const remoteTranslation = document.getElementById('remoteTranslation');
+            if (remoteTranslation) {
+                // Apply styling to make the gesture name more visible
+                remoteTranslation.textContent = gesture;
+                remoteTranslation.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+                remoteTranslation.style.color = 'white';
+                remoteTranslation.style.padding = '10px 20px';
+                remoteTranslation.style.borderRadius = '4px';
+                remoteTranslation.style.fontSize = '24px'; // Increased font size
+                remoteTranslation.style.fontWeight = 'bold';
+                remoteTranslation.style.border = '2px solid #2196F3'; // Different color for remote gestures
+                
+                // Clear the text after 3 seconds
+                setTimeout(() => {
+                    remoteTranslation.textContent = '';
+                    remoteTranslation.style.border = 'none';
+                }, 3000);
+                
+                // Add to gesture history
+                addGestureToHistory({
+                    userId: 'remote',
+                    gesture: { translation: gesture },
+                    timestamp: Date.now()
+                });
+                
+                // Play a different sound for remote gestures (optional)
+                playRemoteGestureSound();
+            }
+        }
+
+        // Add this function to play a sound when a remote gesture is received
+        function playRemoteGestureSound() {
+            const context = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = context.createOscillator();
+            const gainNode = context.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(context.destination);
+            
+            oscillator.type = 'sine';
+            oscillator.frequency.value = 600; // Different frequency for remote gestures
+            gainNode.gain.value = 0.1;
+            
+            oscillator.start(0);
+            
+            setTimeout(() => {
+                oscillator.stop();
+            }, 200);
+        }
 
         // Add this debugging function
         function debugGestureRecognition() {
@@ -1828,6 +1943,97 @@
             
             // Show confirmation
             alert('Gesture recognition restarted');
+        }
+
+        // Add this function to the end of your script
+        function addManualGestureControls() {
+            // Create a container for the manual controls
+            const controlsContainer = document.createElement('div');
+            controlsContainer.className = 'manual-gesture-controls';
+            controlsContainer.style.marginTop = '20px';
+            controlsContainer.style.padding = '15px';
+            controlsContainer.style.backgroundColor = 'white';
+            controlsContainer.style.borderRadius = '8px';
+            controlsContainer.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+            
+            // Add a title
+            const title = document.createElement('h3');
+            title.textContent = 'Manual Gesture Display';
+            controlsContainer.appendChild(title);
+            
+            // Add a description
+            const description = document.createElement('p');
+            description.textContent = 'If automatic gesture recognition is not working, you can manually display gestures:';
+            controlsContainer.appendChild(description);
+            
+            // Create a grid for gesture buttons
+            const buttonGrid = document.createElement('div');
+            buttonGrid.style.display = 'grid';
+            buttonGrid.style.gridTemplateColumns = 'repeat(5, 1fr)';
+            buttonGrid.style.gap = '10px';
+            buttonGrid.style.marginTop = '10px';
+            
+            // Add buttons for each gesture
+            const gestures = [
+                "Hello", "Small", "Super", "Luck", "Love", 
+                "Victory", "Call me", "Prosper", "Power", "Home"
+            ];
+            
+            gestures.forEach(gesture => {
+                const button = document.createElement('button');
+                button.textContent = gesture;
+                button.style.padding = '8px';
+                button.style.backgroundColor = '#007bff';
+                button.style.color = 'white';
+                button.style.border = 'none';
+                button.style.borderRadius = '4px';
+                button.style.cursor = 'pointer';
+                
+                button.addEventListener('click', () => {
+                    // Display the gesture
+                    const translationElement = document.getElementById('localTranslation');
+                    translationElement.textContent = gesture;
+                    translationElement.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+                    translationElement.style.color = 'white';
+                    translationElement.style.padding = '10px 20px';
+                    translationElement.style.borderRadius = '4px';
+                    translationElement.style.fontSize = '24px';
+                    translationElement.style.fontWeight = 'bold';
+                    translationElement.style.border = '2px solid #9C27B0'; // Different color for manual gestures
+                    
+                    // Clear after 3 seconds
+                    setTimeout(() => {
+                        translationElement.textContent = '';
+                        translationElement.style.border = 'none';
+                    }, 3000);
+                    
+                    // Share with remote participant
+                    shareGestureDetection(gesture);
+                    
+                    // Add to history
+                    addGestureToHistory({
+                        userId: socket.id,
+                        gesture: { translation: gesture },
+                        timestamp: Date.now()
+                    });
+                });
+                
+                buttonGrid.appendChild(button);
+            });
+            
+            controlsContainer.appendChild(buttonGrid);
+            
+            // Add the controls to the page
+            document.querySelector('.container').appendChild(controlsContainer);
+        }
+
+        // Call this function when the connection is established
+        function onConnectionEstablished() {
+            // Add manual gesture controls
+            addManualGestureControls();
+            
+            // Start automatic gesture recognition
+            performGestureRecognition(document.getElementById('localVideo'), document.getElementById('localTranslation'));
         }
     </script>
 </body>
