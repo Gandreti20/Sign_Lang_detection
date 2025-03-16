@@ -192,52 +192,64 @@
 
         function createPeerConnection() {
             try {
+                console.log('Creating new RTCPeerConnection');
                 peerConnection = new RTCPeerConnection(configuration);
                 
                 // Add local stream tracks to the connection
                 if (localStream) {
                     localStream.getTracks().forEach(track => {
+                        console.log(`Adding local ${track.kind} track to peer connection`);
                         peerConnection.addTrack(track, localStream);
                     });
                 } else {
-                    console.warn("Local stream not available when creating peer connection");
+                    console.warn('Local stream not available when creating peer connection');
                 }
 
                 // Handle incoming tracks
                 peerConnection.ontrack = event => {
+                    console.log(`Received remote ${event.track.kind} track`);
                     const remoteVideo = document.getElementById('remoteVideo');
                     if (remoteVideo.srcObject !== event.streams[0]) {
-                        console.log("Setting remote video stream");
+                        console.log('Setting remote video stream');
                         remoteVideo.srcObject = event.streams[0];
+                        
+                        // Update UI to show connection is successful
+                        document.getElementById('roomInfo').innerHTML = `
+                            <div class="room-details">
+                                <h3>Connected! 🎉</h3>
+                                <p>Room ID: <strong>${currentRoomId}</strong></p>
+                                <div class="alert" style="background-color: #d4edda; padding: 10px; border-radius: 4px; margin: 10px 0;">
+                                    <p><strong>Connection successful!</strong></p>
+                                    <p>You are now connected with the other participant.</p>
+                                </div>
+                            </div>
+                        `;
                     }
                 };
 
-                // For local rooms, use Scaledrone for ICE candidates
+                // Handle ICE candidates
                 peerConnection.onicecandidate = event => {
                     if (event.candidate) {
-                        console.log("Generated ICE candidate");
+                        console.log('Generated local ICE candidate');
                         
-                        // If we're using a local room with Scaledrone
-                        if (isUsingLocalRoom() && window.signalingDrone) {
-                            sendSignalingMessage({
-                                type: 'candidate',
-                                candidate: event.candidate
-                            });
-                        } else {
-                            // For server rooms, send to the server
-                            socket.emit('ice-candidate', event.candidate);
-                        }
+                        // Send the candidate via Scaledrone
+                        sendSignalingMessage({
+                            type: 'candidate',
+                            candidate: event.candidate
+                        });
+                    } else {
+                        console.log('ICE candidate generation complete');
                     }
                 };
                 
                 // Log connection state changes
                 peerConnection.oniceconnectionstatechange = () => {
-                    console.log("ICE connection state:", peerConnection.iceConnectionState);
+                    console.log('ICE connection state changed to:', peerConnection.iceConnectionState);
                 };
                 
                 return peerConnection;
             } catch (error) {
-                console.error("Error creating peer connection:", error);
+                console.error('Error creating peer connection:', error);
                 return null;
             }
         }
@@ -982,7 +994,7 @@
 
         // Update the createLocalRoom function to mention Scaledrone
         function createLocalRoom() {
-            console.log("Creating room locally with Scaledrone signaling");
+            console.log('Creating new room with Scaledrone signaling');
             
             // Generate a random room ID
             const roomId = Math.random().toString(36).substring(2, 10);
@@ -996,108 +1008,179 @@
             
             document.getElementById('roomInfo').innerHTML = `
                 <div class="room-details">
-                    <h3>Local Room Created! 🎉</h3>
+                    <h3>Creating Room...</h3>
                     <p>Room ID: <strong>${roomId}</strong></p>
-                    <div class="alert" style="background-color: #d4edda; padding: 10px; border-radius: 4px; margin: 10px 0;">
-                        <p><strong>Success:</strong> Your room is ready to share!</p>
-                        <p>This room uses Scaledrone for signaling between peers.</p>
-                    </div>
-                    <div class="share-link">
-                        <p><strong>Share this link with others:</strong></p>
-                        <div style="display: flex; gap: 10px; margin: 10px 0;">
-                            <input type="text" value="${roomUrl}" 
-                                   readonly id="roomLink" 
-                                   style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <button onclick="copyRoomLink()" class="copy-button" 
-                                    style="background: #28a745;">Copy Link</button>
-                        </div>
-                    </div>
-                    <div style="text-align: center; margin: 15px 0;">
-                        <p><strong>Or scan this QR code to join:</strong></p>
-                        <img src="${qrCodeUrl}" alt="Room QR Code" style="max-width: 150px; margin: 10px auto;">
-                    </div>
+                    <p>Setting up signaling service...</p>
                 </div>
             `;
             
             // Set current room ID
             currentRoomId = roomId;
             
-            // Create peer connection and set up Scaledrone signaling
-            createPeerConnection();
-            setupLocalPeerConnection();
-            
-            // Disable frame sending to server
-            window.stopFrameDetection && window.stopFrameDetection();
-            
-            // Make the room joinable
-            document.getElementById('shareRoom').style.display = 'inline-block';
-        }
-
-        // Add this function to use a public signaling service
-        async function setupPublicSignaling(roomId) {
-            // Use your Scaledrone channel ID
-            const drone = new ScaleDrone('Xw9M4ArOLsh59WOa'); 
-            
-            drone.on('open', error => {
-                if (error) {
-                    console.error('Error connecting to signaling server:', error);
-                    return;
-                }
-                
-                // Room name needs to be prefixed with 'observable-'
-                const room = drone.subscribe(`observable-${roomId}`);
-                
-                room.on('open', error => {
-                    if (error) {
-                        console.error('Error opening room:', error);
-                        return;
-                    }
-                    console.log('Connected to signaling room');
+            // Initialize the peer connection and signaling
+            initializeMedia().then(() => {
+                setupLocalPeerConnection().then(() => {
+                    // Update UI with room details
+                    document.getElementById('roomInfo').innerHTML = `
+                        <div class="room-details">
+                            <h3>Room Created! 🎉</h3>
+                            <p>Room ID: <strong>${roomId}</strong></p>
+                            <div class="alert" style="background-color: #d4edda; padding: 10px; border-radius: 4px; margin: 10px 0;">
+                                <p><strong>Success:</strong> Your room is ready to share!</p>
+                                <p>Share the link or room ID with others to join.</p>
+                            </div>
+                            <div class="share-link">
+                                <p><strong>Share this link with others:</strong></p>
+                                <div style="display: flex; gap: 10px; margin: 10px 0;">
+                                    <input type="text" value="${roomUrl}" 
+                                           readonly id="roomLink" 
+                                           style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                                    <button onclick="copyRoomLink()" class="copy-button" 
+                                            style="background: #28a745;">Copy Link</button>
+                                </div>
+                            </div>
+                            <div style="text-align: center; margin: 15px 0;">
+                                <p><strong>Or scan this QR code to join:</strong></p>
+                                <img src="${qrCodeUrl}" alt="Room QR Code" style="max-width: 150px; margin: 10px auto;">
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Disable frame sending to server
+                    window.stopFrameDetection && window.stopFrameDetection();
+                    
+                    // Make the room joinable
+                    document.getElementById('shareRoom').style.display = 'inline-block';
+                }).catch(error => {
+                    console.error('Error setting up peer connection:', error);
+                    
+                    document.getElementById('roomInfo').innerHTML = `
+                        <div class="room-details" style="color: red;">
+                            <h3>Room Creation Error</h3>
+                            <p>Failed to set up signaling: ${error.message}</p>
+                            <button onclick="window.location.reload()" style="background: #dc3545;">Try Again</button>
+                        </div>
+                    `;
                 });
+            }).catch(error => {
+                console.error('Error initializing media:', error);
                 
-                // Listen for signaling messages
-                room.on('data', message => {
-                    if (message.sender !== drone.clientId) {
-                        console.log('Received signaling message:', message);
-                        
-                        if (message.type === 'offer') {
-                            handleRemoteOffer(message.offer);
-                        } else if (message.type === 'answer') {
-                            handleRemoteAnswer(message.answer);
-                        } else if (message.type === 'candidate') {
-                            handleRemoteCandidate(message.candidate);
-                        }
-                    }
-                });
-                
-                // Store the drone instance for sending messages
-                window.signalingDrone = drone;
+                document.getElementById('roomInfo').innerHTML = `
+                    <div class="room-details" style="color: red;">
+                        <h3>Media Access Error</h3>
+                        <p>Failed to access camera/microphone: ${error.message}</p>
+                        <p>Please ensure you have granted permission to use your camera and microphone.</p>
+                        <button onclick="window.location.reload()" style="background: #dc3545;">Try Again</button>
+                    </div>
+                `;
             });
         }
 
-        // Function to send signaling messages
-        function sendSignalingMessage(message) {
-            if (window.signalingDrone) {
-                window.signalingDrone.publish({
-                    room: `observable-${currentRoomId}`,
-                    message: {
-                        ...message,
-                        sender: window.signalingDrone.clientId
+        // First, let's fix the setupPublicSignaling function to properly handle events
+        function setupPublicSignaling(roomId) {
+            return new Promise((resolve, reject) => {
+                console.log("Setting up Scaledrone signaling for room:", roomId);
+                
+                // Create a new Scaledrone instance with your channel ID
+                const drone = new ScaleDrone('Xw9M4ArOLsh59WOa');
+                
+                // Handle connection opening
+                drone.on('open', error => {
+                    if (error) {
+                        console.error('Error connecting to Scaledrone:', error);
+                        reject(error);
+                        return;
                     }
+                    
+                    console.log('Connected to Scaledrone with client ID:', drone.clientId);
+                    
+                    // Subscribe to the room
+                    const roomName = `observable-${roomId}`;
+                    const room = drone.subscribe(roomName);
+                    
+                    room.on('open', error => {
+                        if (error) {
+                            console.error('Error opening room:', error);
+                            reject(error);
+                            return;
+                        }
+                        console.log(`Successfully joined Scaledrone room: ${roomName}`);
+                        
+                        // Store room and drone for later use
+                        window.signalRoom = room;
+                        window.signalingDrone = drone;
+                        
+                        // Set up message handling
+                        room.on('data', message => {
+                            console.log('Received message from Scaledrone:', message);
+                            
+                            // Ignore messages from ourselves
+                            if (message.clientId === drone.clientId) {
+                                console.log('Ignoring message from self');
+                                return;
+                            }
+                            
+                            // Process the message based on its type
+                            if (message.type === 'offer') {
+                                console.log('Received offer from peer');
+                                handleRemoteOffer(message.offer);
+                            } else if (message.type === 'answer') {
+                                console.log('Received answer from peer');
+                                handleRemoteAnswer(message.answer);
+                            } else if (message.type === 'candidate') {
+                                console.log('Received ICE candidate from peer');
+                                handleRemoteCandidate(message.candidate);
+                            }
+                        });
+                        
+                        resolve(drone);
+                    });
                 });
-            }
+                
+                drone.on('error', error => {
+                    console.error('Scaledrone connection error:', error);
+                    reject(error);
+                });
+            });
         }
 
-        // Update the setupLocalPeerConnection function to use the signaling service
-        async function setupLocalPeerConnection() {
-            if (!peerConnection) {
-                createPeerConnection();
+        // Fix the sendSignalingMessage function
+        function sendSignalingMessage(message) {
+            if (!window.signalingDrone) {
+                console.error('Cannot send message: Scaledrone not initialized');
+                return;
             }
             
-            // Set up signaling
-            await setupPublicSignaling(currentRoomId);
+            // Add client ID to the message
+            const enhancedMessage = {
+                ...message,
+                clientId: window.signalingDrone.clientId,
+                timestamp: Date.now()
+            };
+            
+            console.log('Sending message via Scaledrone:', enhancedMessage);
+            
+            // Publish the message to the room
+            window.signalingDrone.publish({
+                room: `observable-${currentRoomId}`,
+                message: enhancedMessage
+            });
+        }
+
+        // Fix the setupLocalPeerConnection function - REPLACE both implementations with this one
+        async function setupLocalPeerConnection() {
+            console.log('Setting up local peer connection as room creator');
             
             try {
+                // Create peer connection if it doesn't exist
+                if (!peerConnection) {
+                    createPeerConnection();
+                }
+                
+                // Set up Scaledrone signaling
+                await setupPublicSignaling(currentRoomId);
+                console.log('Scaledrone signaling set up successfully');
+                
                 // Create an offer
                 const offer = await peerConnection.createOffer({
                     offerToReceiveAudio: true,
@@ -1105,73 +1188,102 @@
                 });
                 
                 await peerConnection.setLocalDescription(offer);
+                console.log('Local description (offer) set successfully');
                 
-                // Send the offer through the signaling service
+                // Send the offer via Scaledrone
                 sendSignalingMessage({
                     type: 'offer',
                     offer: offer
                 });
                 
-                console.log("Local peer connection setup complete");
+                console.log('Offer sent via Scaledrone');
             } catch (error) {
-                console.error("Error setting up local peer connection:", error);
+                console.error('Error setting up local peer connection:', error);
+                
+                document.getElementById('roomInfo').innerHTML = `
+                    <div class="room-details" style="color: red;">
+                        <h3>Connection Error</h3>
+                        <p>Failed to set up connection: ${error.message}</p>
+                        <button onclick="window.location.reload()" style="background: #dc3545;">Try Again</button>
+                    </div>
+                `;
             }
         }
 
-        // Add these handler functions
+        // Fix the handler functions
         async function handleRemoteOffer(offer) {
+            console.log('Processing remote offer');
+            
             try {
+                // Create peer connection if it doesn't exist
+                if (!peerConnection) {
+                    createPeerConnection();
+                }
+                
+                // Set the remote description
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+                console.log('Remote description set successfully');
                 
                 // Create an answer
                 const answer = await peerConnection.createAnswer();
                 await peerConnection.setLocalDescription(answer);
+                console.log('Local description (answer) set successfully');
                 
                 // Send the answer
                 sendSignalingMessage({
                     type: 'answer',
                     answer: answer
                 });
+                
+                // Update UI to show connection is in progress
+                document.getElementById('roomInfo').innerHTML = `
+                    <div class="room-details">
+                        <h3>Connecting to Room...</h3>
+                        <p>Room ID: <strong>${currentRoomId}</strong></p>
+                        <p>Connection in progress. Please wait...</p>
+                    </div>
+                `;
             } catch (error) {
-                console.error("Error handling remote offer:", error);
+                console.error('Error handling remote offer:', error);
+                
+                document.getElementById('roomInfo').innerHTML = `
+                    <div class="room-details" style="color: red;">
+                        <h3>Connection Error</h3>
+                        <p>Failed to process connection offer: ${error.message}</p>
+                        <button onclick="window.location.reload()" style="background: #dc3545;">Try Again</button>
+                    </div>
+                `;
             }
         }
 
         async function handleRemoteAnswer(answer) {
+            console.log('Processing remote answer');
+            
             try {
                 await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+                console.log('Remote description (answer) set successfully');
             } catch (error) {
-                console.error("Error handling remote answer:", error);
+                console.error('Error handling remote answer:', error);
             }
         }
 
         async function handleRemoteCandidate(candidate) {
+            if (!peerConnection) {
+                console.warn('Received ICE candidate but peer connection not created yet');
+                return;
+            }
+            
             try {
                 await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                console.log('Added remote ICE candidate successfully');
             } catch (error) {
-                console.error("Error handling remote ICE candidate:", error);
+                console.error('Error adding remote ICE candidate:', error);
             }
         }
 
-        // Update the ICE candidate handling
-        function setupIceCandidateHandling() {
-            peerConnection.onicecandidate = event => {
-                if (event.candidate) {
-                    console.log("Generated ICE candidate", event.candidate.candidate.substr(0, 50) + "...");
-                    // Send the ICE candidate through the signaling service
-                    sendSignalingMessage({
-                        type: 'candidate',
-                        candidate: event.candidate
-                    });
-                } else {
-                    console.log("ICE candidate generation complete");
-                }
-            };
-        }
-
-        // Update the joinLocalRoom function to use Scaledrone
+        // Fix the joinLocalRoom function
         async function joinLocalRoom(roomId) {
-            console.log("Joining local room:", roomId);
+            console.log('Joining room:', roomId);
             
             try {
                 // Initialize media if not already done
@@ -1182,12 +1294,22 @@
                 // Set current room ID
                 currentRoomId = roomId;
                 
+                // Show waiting message
+                document.getElementById('roomInfo').innerHTML = `
+                    <div class="room-details" style="color: orange;">
+                        <h3>Joining Room...</h3>
+                        <p>Room ID: <strong>${roomId}</strong></p>
+                        <p>Connecting to signaling service...</p>
+                    </div>
+                `;
+                
                 // Create peer connection
                 createPeerConnection();
                 
-                // Set up signaling with Scaledrone
+                // Set up Scaledrone signaling
                 await setupPublicSignaling(roomId);
                 
+                // Update UI to show waiting for offer
                 document.getElementById('roomInfo').innerHTML = `
                     <div class="room-details" style="color: orange;">
                         <h3>Waiting for Room Creator</h3>
@@ -1197,12 +1319,10 @@
                     </div>
                 `;
                 
-                console.log("Joined room with Scaledrone signaling, waiting for offer");
-                
-                // The offer will be received through the Scaledrone data event handler
-                // which is set up in the setupPublicSignaling function
+                console.log('Joined room with Scaledrone signaling, waiting for offer');
             } catch (error) {
-                console.error("Error joining local room:", error);
+                console.error('Error joining room:', error);
+                
                 document.getElementById('roomInfo').innerHTML = `
                     <div class="room-details" style="color: red;">
                         <h3>Error Joining Room</h3>
@@ -1210,147 +1330,6 @@
                         <button onclick="window.location.reload()" style="background: #dc3545;">Try Again</button>
                     </div>
                 `;
-            }
-        }
-
-        // Add this function to handle direct peer connections
-        async function handleDirectPeerConnection(remoteOffer) {
-            try {
-                // Create peer connection if it doesn't exist
-                if (!peerConnection) {
-                    createPeerConnection();
-                }
-                
-                // Set the remote description
-                await peerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(remoteOffer)));
-                
-                // Create an answer
-                const answer = await peerConnection.createAnswer();
-                await peerConnection.setLocalDescription(answer);
-                
-                // Display the answer for manual sharing
-                const answerString = JSON.stringify(answer);
-                
-                document.getElementById('roomInfo').innerHTML += `
-                    <div class="alert" style="background-color: #d4edda; padding: 10px; border-radius: 4px; margin: 10px 0;">
-                        <p><strong>Connection established!</strong></p>
-                        <p>You should now see the remote video once the connection is complete.</p>
-                    </div>
-                `;
-                
-                return answerString;
-            } catch (error) {
-                console.error("Error handling direct peer connection:", error);
-                throw error;
-            }
-        }
-
-        // Add this function to handle ICE candidate exchange for local rooms
-        function setupLocalIceCandidateExchange() {
-            // Store ICE candidates in localStorage
-            peerConnection.onicecandidate = event => {
-                if (event.candidate) {
-                    // Get existing candidates
-                    let candidates = JSON.parse(localStorage.getItem(`ice_${currentRoomId}_${socket.id}`) || '[]');
-                    candidates.push(event.candidate);
-                    localStorage.setItem(`ice_${currentRoomId}_${socket.id}`, JSON.stringify(candidates));
-                }
-            };
-            
-            // Set up a listener to check for remote ICE candidates
-            window.checkForIceCandidates = setInterval(() => {
-                // The remote ID is anything other than our socket ID
-                const keys = Object.keys(localStorage);
-                for (const key of keys) {
-                    if (key.startsWith(`ice_${currentRoomId}_`) && !key.endsWith(socket.id)) {
-                        try {
-                            const candidates = JSON.parse(localStorage.getItem(key) || '[]');
-                            if (candidates.length > 0) {
-                                // Process each candidate
-                                for (const candidate of candidates) {
-                                    peerConnection.addIceCandidate(new RTCIceCandidate(candidate))
-                                        .catch(err => console.error("Error adding ICE candidate:", err));
-                                }
-                                // Clear processed candidates
-                                localStorage.setItem(key, '[]');
-                            }
-                        } catch (error) {
-                            console.error("Error processing ICE candidates:", error);
-                        }
-                    }
-                }
-            }, 1000);
-        }
-
-        // Add this simplified signaling function that uses localStorage but with better error handling
-        async function setupSimplifiedSignaling(roomId) {
-            console.log("Setting up simplified signaling for room:", roomId);
-            
-            // Clear any existing data for this room
-            localStorage.removeItem(`offer_${roomId}`);
-            localStorage.removeItem(`answer_${roomId}`);
-            
-            // Create a timestamp to identify this session
-            const sessionId = Date.now().toString();
-            localStorage.setItem(`session_${roomId}`, sessionId);
-            
-            // Set up a heartbeat to let others know this session is active
-            setInterval(() => {
-                localStorage.setItem(`heartbeat_${roomId}_${sessionId}`, Date.now().toString());
-            }, 2000);
-            
-            // Return the session ID for reference
-            return sessionId;
-        }
-
-        // Replace the setupLocalPeerConnection function with this simplified version
-        async function setupLocalPeerConnection() {
-            if (!peerConnection) {
-                createPeerConnection();
-            }
-            
-            // Set up simplified signaling
-            const sessionId = await setupSimplifiedSignaling(currentRoomId);
-            
-            try {
-                // Create an offer
-                const offer = await peerConnection.createOffer({
-                    offerToReceiveAudio: true,
-                    offerToReceiveVideo: true
-                });
-                
-                await peerConnection.setLocalDescription(offer);
-                
-                // Store the offer in localStorage with the session ID
-                localStorage.setItem(`offer_${currentRoomId}`, JSON.stringify({
-                    offer: offer,
-                    sessionId: sessionId,
-                    timestamp: Date.now()
-                }));
-                
-                console.log("Local peer connection setup complete, offer created");
-                
-                // Set up a listener for the answer
-                window.checkForAnswer = setInterval(() => {
-                    try {
-                        const answerData = JSON.parse(localStorage.getItem(`answer_${currentRoomId}`) || 'null');
-                        if (answerData && answerData.sessionId === sessionId) {
-                            clearInterval(window.checkForAnswer);
-                            
-                            // Apply the answer
-                            peerConnection.setRemoteDescription(new RTCSessionDescription(answerData.answer))
-                                .then(() => console.log("Remote description set successfully"))
-                                .catch(err => console.error("Error setting remote description:", err));
-                            
-                            // Clear the answer
-                            localStorage.removeItem(`answer_${currentRoomId}`);
-                        }
-                    } catch (error) {
-                        console.error("Error checking for answer:", error);
-                    }
-                }, 1000);
-            } catch (error) {
-                console.error("Error setting up local peer connection:", error);
             }
         }
     </script>
