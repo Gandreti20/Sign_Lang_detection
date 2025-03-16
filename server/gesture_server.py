@@ -20,8 +20,15 @@ from model import KeyPointClassifier, PointHistoryClassifier
 from database import db
 
 app = Flask(__name__)
-CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
+# Enable CORS for all routes with proper configuration
+CORS(app, resources={r"/*": {"origins": "*", "allow_headers": ["Content-Type", "Authorization"], "methods": ["GET", "POST", "OPTIONS"]}})
+socketio = SocketIO(app, 
+                   cors_allowed_origins="*", 
+                   ping_timeout=60, 
+                   ping_interval=25, 
+                   async_mode='threading',
+                   logger=True,  # Enable detailed logging
+                   engineio_logger=True)  # Enable Engine.IO logging
 
 # Initialize MediaPipe Hands
 mp_hands = mp.solutions.hands
@@ -52,12 +59,45 @@ def handle_disconnect():
     # Room cleanup will be handled by the database
 
 @socketio.on('create-room')
-def handle_create_room():
-    room_id = str(uuid.uuid4())
-    db.create_room(room_id, request.sid)
-    join_room(room_id)
-    emit('room-created', {'roomId': room_id})
-    print(f'Room created: {room_id}')
+def handle_create_room(data=None):
+    print(f"[Room Creation] Received create-room event from client {request.sid}")
+    
+    try:
+        # Generate a unique room ID
+        room_id = str(uuid.uuid4())[:8]
+        print(f"[Room Creation] Generated room ID: {room_id}")
+        
+        # Join the room
+        join_room(room_id)
+        print(f"[Room Creation] Client {request.sid} joined room {room_id}")
+        
+        # Save room to database
+        try:
+            db.create_room(room_id, request.sid)
+            print(f"[Room Creation] Room {room_id} saved to database")
+        except Exception as db_error:
+            print(f"[Room Creation] Database error: {str(db_error)}")
+            # Continue even if database save fails
+        
+        # Create response data
+        response_data = {'roomId': room_id, 'success': True}
+        
+        # Emit to the client who requested the room
+        print(f"[Room Creation] Emitting room-created event with data: {response_data}")
+        emit('room-created', response_data, to=request.sid)
+        
+        print(f"[Room Creation] Room creation completed successfully")
+        return response_data
+        
+    except Exception as e:
+        error_msg = f"Error creating room: {str(e)}"
+        print(f"[Room Creation Error] {error_msg}")
+        import traceback
+        print(f"[Room Creation Error] Traceback: {traceback.format_exc()}")
+        
+        error_response = {'error': error_msg, 'success': False}
+        emit('error', {'message': error_msg}, to=request.sid)
+        return error_response
 
 @socketio.on('join-room')
 def handle_join_room(data):
@@ -189,6 +229,94 @@ def pre_process_landmark(landmark_list):
     temp_landmark_list = list(map(normalize_, temp_landmark_list))
     
     return temp_landmark_list
+
+@socketio.on('ping')
+def handle_ping():
+    print(f"Received ping from client {request.sid}")
+    emit('pong')
+
+@socketio.on('test-event')
+def handle_test_event(data):
+    print(f"Received test event from client {request.sid}: {data}")
+    emit('test-response', {'received': True, 'message': 'Server received your test event'})
+
+@app.route('/create-room', methods=['POST', 'OPTIONS'])
+def create_room_http():
+    """HTTP endpoint for room creation as a fallback"""
+    # Handle preflight OPTIONS request
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Methods', 'POST')
+        return response
+        
+    try:
+        # Generate a unique room ID
+        room_id = str(uuid.uuid4())[:8]
+        print(f"[HTTP Room Creation] Generated room ID: {room_id}")
+        
+        # Get client ID from request
+        client_id = request.json.get('clientId', 'unknown')
+        
+        # Save room to database
+        try:
+            db.create_room(room_id, client_id)
+            print(f"[HTTP Room Creation] Room {room_id} saved to database")
+        except Exception as db_error:
+            print(f"[HTTP Room Creation] Database error: {str(db_error)}")
+        
+        # Create response
+        response = jsonify({
+            'success': True,
+            'roomId': room_id
+        })
+        
+        # Add CORS headers
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        return response
+        
+    except Exception as e:
+        error_msg = f"Error creating room: {str(e)}"
+        print(f"[HTTP Room Creation Error] {error_msg}")
+        
+        # Create error response
+        response = jsonify({
+            'success': False,
+            'error': error_msg
+        })
+        
+        # Add CORS headers
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        return response, 500
+
+@socketio.on('simple-create-room')
+def handle_simple_create_room():
+    """Simplified room creation event"""
+    print(f"[Simple Room Creation] Received simple-create-room event from client {request.sid}")
+    
+    try:
+        # Generate a unique room ID
+        room_id = str(uuid.uuid4())[:8]
+        print(f"[Simple Room Creation] Generated room ID: {room_id}")
+        
+        # Join the room
+        join_room(room_id)
+        print(f"[Simple Room Creation] Client {request.sid} joined room {room_id}")
+        
+        # Create response data
+        response_data = {'roomId': room_id, 'success': True}
+        
+        # Emit to the client who requested the room
+        print(f"[Simple Room Creation] Emitting simple-room-created event with data: {response_data}")
+        emit('simple-room-created', response_data, to=request.sid)
+        
+        print(f"[Simple Room Creation] Room creation completed successfully")
+        
+    except Exception as e:
+        error_msg = f"Error creating room: {str(e)}"
+        print(f"[Simple Room Creation Error] {error_msg}")
+        emit('error', {'message': error_msg}, to=request.sid)
 
 if __name__ == '__main__':
     print("Starting Gesture Recognition Server...")
