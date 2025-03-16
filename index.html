@@ -213,7 +213,8 @@
                         console.log('Setting remote video stream');
                         remoteVideo.srcObject = event.streams[0];
                         
-                        // Start gesture recognition on both local and remote videos
+                        // Start gesture recognition on local video
+                        console.log('Starting gesture recognition on local video');
                         performGestureRecognition(document.getElementById('localVideo'), document.getElementById('localTranslation'));
                         
                         // Update UI to show connection is successful and add end meeting button
@@ -234,6 +235,11 @@
                                     ` : ''}
                                     <button onclick="endMeeting()" style="background: #dc3545;">
                                         End Meeting
+                                    </button>
+                                </div>
+                                <div style="margin-top: 15px;">
+                                    <button onclick="restartGestureRecognition()" style="background: #28a745;">
+                                        Restart Gesture Recognition
                                     </button>
                                 </div>
                             </div>
@@ -1671,20 +1677,36 @@
         function displayRemoteGesture(gesture) {
             const remoteTranslation = document.getElementById('remoteTranslation');
             if (remoteTranslation) {
+                // Apply styling to make the gesture name more visible
                 remoteTranslation.textContent = gesture;
+                remoteTranslation.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+                remoteTranslation.style.color = 'white';
+                remoteTranslation.style.padding = '10px 20px';
+                remoteTranslation.style.borderRadius = '4px';
+                remoteTranslation.style.fontSize = '18px';
+                remoteTranslation.style.fontWeight = 'bold';
                 
                 // Clear the text after 3 seconds
                 setTimeout(() => {
                     remoteTranslation.textContent = '';
                 }, 3000);
+                
+                // Add to gesture history
+                addGestureToHistory({
+                    userId: 'remote',
+                    gesture: { translation: gesture },
+                    timestamp: Date.now()
+                });
             }
         }
 
-        // Add this function to perform gesture recognition on video frames
+        // Update the performGestureRecognition function
         function performGestureRecognition(videoElement, translationElement) {
             // Create a canvas to capture video frames
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
+            
+            console.log('Starting gesture recognition on video element');
             
             // Set up the recognition interval
             const recognitionInterval = setInterval(() => {
@@ -1701,7 +1723,7 @@
                 ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
                 
                 // Get the image data from the canvas
-                const imageData = canvas.toDataURL('image/jpeg', 0.8);
+                const imageData = canvas.toDataURL('image/jpeg', 0.7);
                 
                 // Send the frame for server-side gesture recognition
                 if (socket.connected) {
@@ -1709,11 +1731,15 @@
                         frame: imageData,
                         roomId: currentRoomId
                     });
+                } else {
+                    console.log('Socket not connected, cannot send frame for recognition');
                 }
-            }, 200); // Process every 200ms to reduce CPU usage
+            }, 300); // Process every 300ms to balance responsiveness and performance
             
             // Store the interval ID for cleanup
             window.gestureRecognitionInterval = recognitionInterval;
+            
+            console.log('Gesture recognition started');
         }
 
         // Add this function to stop gesture recognition
@@ -1724,14 +1750,22 @@
             }
         }
 
-        // Add this socket event handler for gesture recognition results
+        // Update the socket event handler for gesture recognition results
         socket.on('gesture-recognition-result', data => {
             console.log('Received gesture recognition result:', data);
             
             // Display the recognized gesture
             if (data.gesture) {
                 const translationElement = document.getElementById('localTranslation');
+                
+                // Apply styling to make the gesture name more visible
                 translationElement.textContent = data.gesture;
+                translationElement.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+                translationElement.style.color = 'white';
+                translationElement.style.padding = '10px 20px';
+                translationElement.style.borderRadius = '4px';
+                translationElement.style.fontSize = '18px';
+                translationElement.style.fontWeight = 'bold';
                 
                 // Share the gesture with the other participant
                 shareGestureDetection(data.gesture);
@@ -1749,6 +1783,52 @@
                 });
             }
         });
+
+        // Add this debugging function
+        function debugGestureRecognition() {
+            console.log('Debugging gesture recognition:');
+            console.log('- Socket connected:', socket.connected);
+            console.log('- Current room ID:', currentRoomId);
+            console.log('- Local video ready:', document.getElementById('localVideo').readyState);
+            console.log('- Remote video ready:', document.getElementById('remoteVideo').readyState);
+            console.log('- Gesture recognition interval active:', window.gestureRecognitionInterval !== undefined);
+            
+            // Test socket connection
+            if (socket.connected) {
+                socket.emit('test-gesture-recognition', {}, (response) => {
+                    console.log('Gesture recognition test response:', response);
+                });
+            }
+        }
+
+        // Add a button to trigger debugging
+        document.getElementById('roomInfo').innerHTML += `
+            <div style="margin-top: 10px;">
+                <button onclick="debugGestureRecognition()" style="background: #6c757d;">
+                    Debug Gesture Recognition
+                </button>
+            </div>
+        `;
+
+        // Add this socket event handler for testing
+        socket.on('test-gesture-recognition-response', (data) => {
+            console.log('Received test gesture recognition response:', data);
+            alert('Gesture recognition test: ' + (data.success ? 'Successful' : 'Failed'));
+        });
+
+        // Add this function to restart gesture recognition
+        function restartGestureRecognition() {
+            console.log('Restarting gesture recognition');
+            
+            // Stop current recognition
+            stopGestureRecognition();
+            
+            // Start recognition again
+            performGestureRecognition(document.getElementById('localVideo'), document.getElementById('localTranslation'));
+            
+            // Show confirmation
+            alert('Gesture recognition restarted');
+        }
     </script>
 </body>
 </html> 
