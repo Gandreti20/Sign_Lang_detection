@@ -45,6 +45,47 @@ print(f"Server directory: {server_dir}")
 keypoint_classifier = KeyPointClassifier()
 point_history_classifier = PointHistoryClassifier()
 
+# Load the keypoint classifier labels
+keypoint_classifier_labels = []
+point_history_classifier_labels = []
+
+# Load the label files
+def load_labels():
+    global keypoint_classifier_labels, point_history_classifier_labels
+    
+    # Path to keypoint classifier labels
+    keypoint_label_path = os.path.join(server_dir, 'model', 'keypoint_classifier_label.csv')
+    # If file doesn't exist in server/model, try to use the one from outside server
+    if not os.path.exists(keypoint_label_path):
+        keypoint_label_path = os.path.join(os.path.dirname(server_dir), 'model', 'keypoint_classifier', 'keypoint_classifier_label.csv')
+    
+    # Path to point history classifier labels
+    point_history_label_path = os.path.join(server_dir, 'model', 'point_history_classifier_label.csv')
+    # If file doesn't exist in server/model, try to use the one from outside server
+    if not os.path.exists(point_history_label_path):
+        point_history_label_path = os.path.join(os.path.dirname(server_dir), 'model', 'point_history_classifier', 'point_history_classifier_label.csv')
+    
+    # Load keypoint classifier labels
+    if os.path.exists(keypoint_label_path):
+        with open(keypoint_label_path, 'r', encoding='utf-8') as f:
+            keypoint_classifier_labels = [line.strip() for line in f]
+        print(f"Loaded {len(keypoint_classifier_labels)} keypoint classifier labels from {keypoint_label_path}")
+    else:
+        print(f"Warning: Keypoint classifier label file not found at {keypoint_label_path}")
+        keypoint_classifier_labels = ["Unknown"]
+    
+    # Load point history classifier labels
+    if os.path.exists(point_history_label_path):
+        with open(point_history_label_path, 'r', encoding='utf-8') as f:
+            point_history_classifier_labels = [line.strip() for line in f]
+        print(f"Loaded {len(point_history_classifier_labels)} point history classifier labels from {point_history_label_path}")
+    else:
+        print(f"Warning: Point history classifier label file not found at {point_history_label_path}")
+        point_history_classifier_labels = ["Unknown"]
+
+# Call the function to load labels
+load_labels()
+
 @app.route('/')
 def index():
     return "Gesture Recognition Server Running"
@@ -353,12 +394,18 @@ def recognize_gesture(data):
                 hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
                 
                 # Get the gesture name
-                gesture_name = keypoint_classifier_labels[hand_sign_id]
+                if 0 <= hand_sign_id < len(keypoint_classifier_labels):
+                    gesture_name = keypoint_classifier_labels[hand_sign_id]
+                else:
+                    gesture_name = "Unknown"
+                
+                print(f"Recognized gesture: {gesture_name} (ID: {hand_sign_id})")
                 
                 # Send the result back to the client
                 emit('gesture-recognition-result', {
-                    'gesture': gesture_name
-                })
+                    'gesture': gesture_name,
+                    'gestureId': int(hand_sign_id)
+                }, to=request.sid)
                 
                 # Also store in gesture history
                 store_gesture(room_id, request.sid, gesture_name)
@@ -367,6 +414,20 @@ def recognize_gesture(data):
                 break
     except Exception as e:
         print(f"Error in gesture recognition: {e}")
+        import traceback
+        print(traceback.format_exc())
+
+def store_gesture(room_id, user_id, gesture_name):
+    """Store gesture in database"""
+    try:
+        gesture_data = {
+            'userId': user_id,
+            'gesture': {'translation': gesture_name},
+            'timestamp': datetime.now().isoformat()
+        }
+        db.add_gesture(room_id, user_id, gesture_data)
+    except Exception as e:
+        print(f"Error storing gesture: {e}")
 
 if __name__ == '__main__':
     print("Starting Gesture Recognition Server...")
