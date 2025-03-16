@@ -992,9 +992,12 @@
             }
         }
 
-        // Update the createLocalRoom function to mention Scaledrone
+        // Update the createLocalRoom function to set the creator flag
         function createLocalRoom() {
             console.log('Creating new room with Scaledrone signaling');
+            
+            // Set a flag to indicate we're the room creator
+            window.isCreator = true;
             
             // Generate a random room ID
             const roomId = Math.random().toString(36).substring(2, 10);
@@ -1076,7 +1079,7 @@
             });
         }
 
-        // First, let's fix the setupPublicSignaling function to properly handle events
+        // Update the setupPublicSignaling function to detect when members join the room
         function setupPublicSignaling(roomId) {
             return new Promise((resolve, reject) => {
                 console.log("Setting up Scaledrone signaling for room:", roomId);
@@ -1130,7 +1133,37 @@
                             } else if (message.type === 'candidate') {
                                 console.log('Received ICE candidate from peer');
                                 handleRemoteCandidate(message.candidate);
+                            } else if (message.type === 'join-notification') {
+                                console.log('Someone joined the room:', message.clientId);
+                                // If we're the room creator, send an offer to the new participant
+                                if (isRoomCreator()) {
+                                    console.log('We are the room creator, sending offer to new participant');
+                                    createAndSendOffer();
+                                }
                             }
+                        });
+                        
+                        // Set up member tracking to detect when someone joins
+                        room.on('members', members => {
+                            console.log('Current room members:', members);
+                            
+                            // Store the members list
+                            window.roomMembers = members;
+                            
+                            // If we're joining (not creating) and there are other members, send a join notification
+                            if (!isRoomCreator() && members.length > 1) {
+                                console.log('Sending join notification to room creator');
+                                sendSignalingMessage({
+                                    type: 'join-notification',
+                                    message: 'New participant joined'
+                                });
+                            }
+                        });
+                        
+                        // Announce our presence in the room
+                        sendSignalingMessage({
+                            type: 'presence',
+                            message: 'Participant active in room'
                         });
                         
                         resolve(drone);
@@ -1142,6 +1175,38 @@
                     reject(error);
                 });
             });
+        }
+
+        // Add a function to check if we're the room creator
+        function isRoomCreator() {
+            // If we created the room, we'll have a flag set
+            return window.isCreator === true;
+        }
+
+        // Add a function to create and send an offer
+        async function createAndSendOffer() {
+            try {
+                console.log('Creating new offer to send to participant');
+                
+                // Create an offer
+                const offer = await peerConnection.createOffer({
+                    offerToReceiveAudio: true,
+                    offerToReceiveVideo: true
+                });
+                
+                await peerConnection.setLocalDescription(offer);
+                console.log('Local description (offer) set successfully');
+                
+                // Send the offer via Scaledrone
+                sendSignalingMessage({
+                    type: 'offer',
+                    offer: offer
+                });
+                
+                console.log('New offer sent via Scaledrone');
+            } catch (error) {
+                console.error('Error creating and sending offer:', error);
+            }
         }
 
         // Fix the sendSignalingMessage function
@@ -1197,6 +1262,23 @@
                 });
                 
                 console.log('Offer sent via Scaledrone');
+                
+                // Set up a periodic check to resend the offer if needed
+                window.offerInterval = setInterval(() => {
+                    // If we have room members and we're the creator, check if we need to resend the offer
+                    if (window.roomMembers && window.roomMembers.length > 1 && isRoomCreator()) {
+                        console.log('Checking if we need to resend offer...');
+                        // Only resend if we don't have a remote connection yet
+                        if (peerConnection.iceConnectionState === 'new' || 
+                            peerConnection.iceConnectionState === 'checking') {
+                            console.log('Connection not established yet, resending offer');
+                            createAndSendOffer();
+                        } else {
+                            console.log('Connection already established, no need to resend offer');
+                            clearInterval(window.offerInterval);
+                        }
+                    }
+                }, 5000); // Check every 5 seconds
             } catch (error) {
                 console.error('Error setting up local peer connection:', error);
                 
@@ -1332,6 +1414,22 @@
                 `;
             }
         }
+
+        // Add this function to help debug connection issues
+        function debugConnectionState() {
+            console.log('===== CONNECTION DEBUG INFO =====');
+            console.log('ICE Connection State:', peerConnection ? peerConnection.iceConnectionState : 'No peer connection');
+            console.log('Signaling State:', peerConnection ? peerConnection.signalingState : 'No peer connection');
+            console.log('Room Members:', window.roomMembers ? window.roomMembers.length : 'No members info');
+            console.log('Is Creator:', window.isCreator === true ? 'Yes' : 'No');
+            console.log('Room ID:', currentRoomId);
+            console.log('Local Stream:', localStream ? 'Available' : 'Not available');
+            console.log('Remote Stream:', document.getElementById('remoteVideo').srcObject ? 'Available' : 'Not available');
+            console.log('================================');
+        }
+
+        // Call this function periodically to monitor the connection state
+        setInterval(debugConnectionState, 5000);
     </script>
 </body>
 </html> 
